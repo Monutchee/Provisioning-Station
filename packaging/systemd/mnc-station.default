@@ -1,5 +1,6 @@
 # Optional Provisioning Station environment.
-# Point this at xsdb when the system service cannot discover the Xilinx install.
+# The service automatically searches /opt/Xilinx after checking PATH.
+# Set this only for a nonstandard install or explicit version selection.
 # MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
 
 # The packaged service listens on every IPv4 interface by default. Override it
