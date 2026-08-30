@@ -99,6 +99,42 @@ func TestProtectedAPIRequiresExactBearerToken(t *testing.T) {
 	}
 }
 
+func TestCapabilitiesPreferFirstDetectedInterfaceForTFTP(t *testing.T) {
+	services := newTestServices(t, "")
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/capabilities", nil)
+	response := httptest.NewRecorder()
+	services.handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	var capabilities struct {
+		Network struct {
+			PreferredTFTPServerIP string   `json:"preferredTftpServerIp"`
+			IPv4Addresses         []string `json:"ipv4Addresses"`
+			IPv4Interfaces        []struct {
+				Name    string `json:"name"`
+				Address string `json:"address"`
+			} `json:"ipv4Interfaces"`
+		} `json:"network"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &capabilities); err != nil {
+		t.Fatal(err)
+	}
+	if len(capabilities.Network.IPv4Interfaces) == 0 {
+		if capabilities.Network.PreferredTFTPServerIP != "" || len(capabilities.Network.IPv4Addresses) != 0 {
+			t.Fatalf("network=%+v", capabilities.Network)
+		}
+		return
+	}
+	first := capabilities.Network.IPv4Interfaces[0]
+	if first.Name == "" || capabilities.Network.PreferredTFTPServerIP != first.Address {
+		t.Fatalf("network=%+v", capabilities.Network)
+	}
+	if len(capabilities.Network.IPv4Addresses) == 0 || capabilities.Network.IPv4Addresses[0] != first.Address {
+		t.Fatalf("network=%+v", capabilities.Network)
+	}
+}
+
 func TestArtifactUploadCreatesRunnableJobAndEvents(t *testing.T) {
 	services := newTestServices(t, "")
 	archive := testArtifactArchive(t)

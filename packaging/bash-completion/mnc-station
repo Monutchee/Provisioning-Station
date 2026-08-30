@@ -27,7 +27,7 @@ _mnc_station()
     fi
 
     if ((COMP_CWORD == 1)); then
-        mapfile -t COMPREPLY < <(compgen -W 'serve inspect version help --version --help -version -h' -- "${cur}")
+        mapfile -t COMPREPLY < <(compgen -W 'serve inspect token version help --version --help -version -h' -- "${cur}")
         return
     fi
 
@@ -64,6 +64,23 @@ _mnc_station()
             else
                 _mnc_station_complete_files "" "${cur}"
             fi
+            ;;
+        token)
+            case "${cur}" in
+                --data-dir=*|-data-dir=*|--api-token-file=*|-api-token-file=*)
+                    prefix="${cur%%=*}="
+                    value="${cur#*=}"
+                    _mnc_station_complete_files "${prefix}" "${value}"
+                    return
+                    ;;
+            esac
+            case "${prev}" in
+                --data-dir|-data-dir|--api-token-file|-api-token-file)
+                    _mnc_station_complete_files "" "${cur}"
+                    return
+                    ;;
+            esac
+            mapfile -t COMPREPLY < <(compgen -W '--service --data-dir --api-token-file --help -h' -- "${cur}")
             ;;
         version|help|--version|--help|-version|-h)
             COMPREPLY=()

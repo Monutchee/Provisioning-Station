@@ -101,8 +101,9 @@
             </label>
             <label class="field">
               <span>TFTP server IPv4</span>
-              <input id="tftp-server-ip" name="tftpServerIp" placeholder="192.168.1.10" inputmode="decimal" spellcheck="false" required>
-              <small>IP of this Station machine</small>
+              <input id="tftp-server-ip" name="tftpServerIp" placeholder="192.168.1.10" inputmode="decimal" spellcheck="false" list="tftp-server-ip-options" required>
+              <datalist id="tftp-server-ip-options"></datalist>
+              <small>Detected Station IP; edit for another interface</small>
             </label>
             <label class="field">
               <span>Board IPv4 <em>optional</em></span>

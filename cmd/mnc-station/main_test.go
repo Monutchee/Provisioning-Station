@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -82,5 +83,41 @@ func TestResolveAPITokenLeavesLoopbackUnauthenticated(t *testing.T) {
 	}
 	if token != "" || tokenFile != "" {
 		t.Fatalf("token=%q tokenFile=%q", token, tokenFile)
+	}
+}
+
+func TestExistingAPITokenReadsManagedToken(t *testing.T) {
+	dataDirectory := t.TempDir()
+	want := "0123456789abcdef0123456789abcdef"
+	if err := os.WriteFile(filepath.Join(dataDirectory, "api-token"), []byte(want+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	token, err := existingAPIToken(serveConfig{DataDir: dataDirectory}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != want {
+		t.Fatalf("token=%q", token)
+	}
+}
+
+func TestExistingAPITokenUsesEnvironmentToken(t *testing.T) {
+	want := "0123456789abcdef"
+	token, err := existingAPIToken(serveConfig{APIToken: want, DataDir: t.TempDir()}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != want {
+		t.Fatalf("token=%q", token)
+	}
+}
+
+func TestExistingAPITokenDoesNotCreateMissingToken(t *testing.T) {
+	dataDirectory := t.TempDir()
+	if _, err := existingAPIToken(serveConfig{DataDir: dataDirectory}, false); err == nil {
+		t.Fatal("missing token was accepted")
+	}
+	if _, err := os.Stat(filepath.Join(dataDirectory, "api-token")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing token was created: %v", err)
 	}
 }

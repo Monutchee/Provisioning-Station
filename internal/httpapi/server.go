@@ -89,6 +89,18 @@ func (server *Server) capabilities(response http.ResponseWriter, _ *http.Request
 		xsdbStatus["error"] = xsdbErr.Error()
 	}
 	limits := server.artifacts.Limits()
+	stationInterfaces := stationIPv4Interfaces()
+	stationAddresses := make([]string, 0, len(stationInterfaces))
+	for _, networkInterface := range stationInterfaces {
+		stationAddresses = append(stationAddresses, networkInterface.Address)
+	}
+	networkStatus := map[string]any{
+		"ipv4Addresses":  stationAddresses,
+		"ipv4Interfaces": stationInterfaces,
+	}
+	if len(stationInterfaces) != 0 {
+		networkStatus["preferredTftpServerIp"] = stationInterfaces[0].Address
+	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"apiVersion": APIVersion,
 		"version":    server.config.Version,
@@ -101,6 +113,7 @@ func (server *Server) capabilities(response http.ResponseWriter, _ *http.Request
 		"executors":    []string{"xilinx-xsdb"},
 		"operations":   []string{"jtag-boot"},
 		"tftpListen":   server.config.TFTPListen,
+		"network":      networkStatus,
 		"xsdb":         xsdbStatus,
 		"authRequired": server.config.APIToken != "",
 	})

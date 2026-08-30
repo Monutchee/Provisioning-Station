@@ -40,6 +40,7 @@ const usage = `Monutchee Provisioning Station
 Usage:
   mnc-station serve [options]
   mnc-station inspect [options] <artifact.tar.gz>
+  mnc-station token [options]
   mnc-station version
 
 Run "mnc-station <command> -help" for command options.
@@ -61,6 +62,8 @@ func run(arguments []string) error {
 		return runServe(arguments[1:])
 	case "inspect":
 		return runInspect(arguments[1:])
+	case "token":
+		return runToken(arguments[1:])
 	case "version", "--version", "-version":
 		fmt.Printf("mnc-station %s (commit %s, built %s)\n", version, commit, buildDate)
 		return nil
@@ -263,6 +266,73 @@ func runInspect(arguments []string) error {
 		fmt.Println("Signature: absent")
 	}
 	return nil
+}
+
+func runToken(arguments []string) error {
+	defaults, err := defaultServeConfig()
+	if err != nil {
+		return err
+	}
+	flags := flag.NewFlagSet("token", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	dataDir := flags.String("data-dir", defaults.DataDir, "Station data directory containing the managed API token")
+	tokenFile := flags.String("api-token-file", defaults.TokenFile, "explicit API bearer token file")
+	service := flags.Bool("service", false, "show the Debian system service token")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("token accepts no positional arguments")
+	}
+
+	config := defaults
+	config.DataDir = *dataDir
+	config.TokenFile = *tokenFile
+	token, err := existingAPIToken(config, *service)
+	if err != nil {
+		return err
+	}
+	fmt.Println(token)
+	return nil
+}
+
+func existingAPIToken(config serveConfig, service bool) (string, error) {
+	if service {
+		if runtime.GOOS != "linux" {
+			return "", fmt.Errorf("--service is only available for Debian service installations")
+		}
+		config.APIToken = ""
+		if config.TokenFile == "" {
+			config.TokenFile = "/var/lib/mnc-station/api-token"
+		}
+	}
+	if config.APIToken != "" || config.TokenFile != "" {
+		token, err := loadAPIToken(config.APIToken, config.TokenFile)
+		if err != nil {
+			return "", tokenReadError(config.TokenFile, service, err)
+		}
+		return token, nil
+	}
+
+	tokenFile := filepath.Join(config.DataDir, "api-token")
+	token, err := loadAPIToken("", tokenFile)
+	if err != nil {
+		return "", tokenReadError(tokenFile, service, err)
+	}
+	return token, nil
+}
+
+func tokenReadError(tokenFile string, service bool, err error) error {
+	if errors.Is(err, os.ErrNotExist) {
+		if runtime.GOOS == "linux" && !service {
+			return fmt.Errorf("API token does not exist at %s; start the Station first, or use 'sudo mnc-station token --service' for the Debian service", tokenFile)
+		}
+		return fmt.Errorf("API token does not exist at %s; start the Station first", tokenFile)
+	}
+	if service && errors.Is(err, os.ErrPermission) {
+		return fmt.Errorf("read Debian service API token: %w (try: sudo mnc-station token --service)", err)
+	}
+	return err
 }
 
 func loadAPIToken(environmentToken, tokenFile string) (string, error) {

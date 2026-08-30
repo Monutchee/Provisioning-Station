@@ -20,7 +20,7 @@ const elements = Object.fromEntries([
   "token-form", "api-token", "drop-zone", "artifact-file", "upload-progress",
   "artifact-select", "artifact-count", "artifact-card", "artifact-vendor",
   "artifact-name", "artifact-details", "boot-form", "hw-server-url",
-  "tftp-server-ip", "board-ip", "form-error", "start-button", "refresh-jobs",
+  "tftp-server-ip", "tftp-server-ip-options", "board-ip", "form-error", "start-button", "refresh-jobs",
   "empty-jobs", "job-workspace", "job-select", "job-state", "job-title",
   "job-meta", "cancel-button", "timeline", "toast",
 ].map((id) => [id, document.getElementById(id)]));
@@ -57,6 +57,7 @@ async function loadCapabilities() {
     elements["tftp-listen"].textContent = state.capabilities.tftpListen;
     elements["xsdb-state"].textContent = state.capabilities.xsdb.available ? "Ready" : "Not found";
     elements["xsdb-state"].title = state.capabilities.xsdb.path || state.capabilities.xsdb.error || "";
+    populateStationAddresses();
     elements["auth-notice"].classList.add("hidden");
     setConnected(true, "Agent online");
     await Promise.all([loadArtifacts(), loadJobs()]);
@@ -68,6 +69,22 @@ async function loadCapabilities() {
     }
     setConnected(false, "Agent unavailable");
     showToast(error.message);
+  }
+}
+
+function populateStationAddresses() {
+  const interfaces = state.capabilities?.network?.ipv4Interfaces || [];
+  const addresses = state.capabilities?.network?.ipv4Addresses || [];
+  const options = elements["tftp-server-ip-options"];
+  options.replaceChildren(...interfaces.map((networkInterface) => {
+    const option = document.createElement("option");
+    option.value = networkInterface.address;
+    option.label = networkInterface.name;
+    return option;
+  }));
+  const preferred = state.capabilities?.network?.preferredTftpServerIp || addresses[0] || "";
+  if (!elements["tftp-server-ip"].value && preferred) {
+    elements["tftp-server-ip"].value = preferred;
   }
 }
 

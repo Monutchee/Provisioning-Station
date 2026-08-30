@@ -118,7 +118,8 @@ The most useful service flags and environment variables are:
 `MNC_STATION_TOKEN` can supply the token directly. When listening on a
 non-loopback address without an explicitly configured token, the agent creates
 a private `api-token` file in its data directory. The Debian service stores it
-at `/var/lib/mnc-station/api-token`; enter that token when the dashboard asks.
+at `/var/lib/mnc-station/api-token`; display it with
+`sudo mnc-station token --service` and enter it when the dashboard asks.
 Put TLS or a mutually authenticated reverse proxy in front of the agent before
 exposing it beyond a trusted station network.
 
