@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Monutchee Provisioning Station"
+      Manufacturer="Monutchee"
+      Version="$(var.Version)"
+      UpgradeCode="A01B14FC-3A83-4C8E-A2E6-C056AB8A2F27"
+      Scope="perMachine"
+      InstallerVersion="500">
+    <MajorUpgrade DowngradeErrorMessage="A newer Provisioning Station is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Monutchee Provisioning Station">
+        <Component Id="StationExecutable" Guid="*" Bitness="always64">
+          <File Id="StationExecutableFile" Source="$(var.SourceDir)\mnc-station.exe" KeyPath="yes">
+            <Shortcut
+                Id="StationStartMenuShortcut"
+                Directory="ProgramMenuFolder"
+                Name="Monutchee Provisioning Station"
+                Description="Open the local provisioning dashboard"
+                Arguments="serve --open-browser"
+                WorkingDirectory="INSTALLFOLDER"
+                Advertise="yes" />
+          </File>
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="Provisioning Station" Level="1">
+      <ComponentRef Id="StationExecutable" />
+    </Feature>
+  </Package>
+</Wix>

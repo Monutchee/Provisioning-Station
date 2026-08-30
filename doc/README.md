@@ -1,0 +1,294 @@
+# Provisioning Station user guide
+
+This guide explains how to run the Monutchee Provisioning Station, import a
+Station artifact, and boot an MSAP1 board through Xilinx JTAG. For compiler and
+packaging instructions, see [BUILDING.md](BUILDING.md).
+
+The first supported operation is a RAM boot using Xilinx XSDB. The Station does
+not include Vivado, Vitis, XSDB, or `hw_server`; those tools remain part of the
+Xilinx installation.
+
+## How the Station fits together
+
+```text
+Browser or mnc deploy
+        |
+        | HTTP API (default 127.0.0.1:8042)
+        v
+Provisioning Station
+   |             |
+   | XSDB        | read-only TFTP (UDP 69)
+   v             v
+Xilinx        target board
+hw_server
+```
+
+XSDB runs on the Station computer. The Xilinx `hw_server` can run on that same
+computer or on another reachable computer. During boot, the target board must
+be able to reach the Station computer's TFTP IPv4 address.
+
+## Prerequisites
+
+Before starting a real JTAG boot, make sure that:
+
+- A Linux or Windows Station binary is installed or extracted.
+- XSDB is installed on the Station computer as part of Vivado or Vitis.
+- A local or remote Xilinx `hw_server` is running and reachable, normally on
+  TCP port 3121.
+- The JTAG adapter is visible to `hw_server`.
+- The target board can reach the Station computer over the provisioning
+  network.
+- UDP port 69 is available for the Station's TFTP listener.
+- An `mnc-station-artifact` v2 `.tar.gz` file is available. For MSAP1 this is
+  normally `msap1-jtag-image.tar.gz` from the Yocto
+  `build/export/provision-image/` directory.
+
+Only one provisioning job runs at a time. Additional jobs remain queued.
+
+## Validate an artifact first
+
+Artifact inspection validates the archive, manifest, paths, file types, sizes,
+modes, and SHA-256 values without saving the artifact:
+
+```bash
+mnc-station inspect msap1-jtag-image.tar.gz
+```
+
+Use JSON output for scripts:
+
+```bash
+mnc-station inspect --json msap1-jtag-image.tar.gz
+```
+
+A valid artifact is not automatically trusted or authorized for production.
+The optional `manifest.sig` is retained, but signature verification belongs to
+the future protected release pipeline.
+
+## Start the Station on Linux
+
+Set the XSDB path when it is not already on `PATH`:
+
+```bash
+export MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
+mnc-station serve --open-browser
+```
+
+TFTP normally uses UDP port 69. A portable binary needs the narrow low-port
+capability when it is run as a regular user:
+
+```bash
+sudo setcap cap_net_bind_service=+ep /path/to/mnc-station
+/path/to/mnc-station serve --open-browser
+```
+
+Rebuilding or replacing the binary removes that file capability, so apply it
+again after an upgrade. For UI-only testing, use an unprivileged port:
+
+```bash
+mnc-station serve --tftp-listen=127.0.0.1:6969 --open-browser
+```
+
+A real board still sends its initial TFTP request to port 69, so port 6969 is
+only useful for development and automated tests.
+
+### Linux system service
+
+The Debian package installs and enables `mnc-station.service`. Configure XSDB
+in `/etc/default/mnc-station`:
+
+```text
+MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
+```
+
+Then restart and inspect the service:
+
+```bash
+sudo systemctl restart mnc-station
+systemctl status mnc-station
+journalctl -u mnc-station -f
+```
+
+The service dashboard is available at `http://127.0.0.1:8042/`, and persistent
+artifacts and jobs are stored under `/var/lib/mnc-station`.
+
+## Start the Station on Windows
+
+Open PowerShell or a Xilinx command prompt and provide the path to `xsdb.bat`
+when XSDB is not already discoverable:
+
+```powershell
+$env:MNC_XSDB = "C:\Xilinx\Vitis\2025.2\bin\xsdb.bat"
+.\mnc-station.exe serve --open-browser
+```
+
+The browser opens `http://127.0.0.1:8042/`. Allow the Station executable to
+receive TFTP traffic through Windows Defender Firewall on the trusted
+provisioning network. If the MSI Start menu shortcut is used, configure
+`MNC_XSDB` as a persistent user or system environment variable, or make XSDB
+available on `PATH`.
+
+Stop a foreground Station with `Ctrl+C` on either platform.
+
+## Boot from the browser dashboard
+
+1. Open `http://127.0.0.1:8042/`.
+2. Confirm that the agent reports **XSDB available**.
+3. Drop `msap1-jtag-image.tar.gz` onto the artifact area, or select it using
+   the file picker.
+4. Select the imported artifact.
+5. Enter the hardware-server URL. Use `tcp:127.0.0.1:3121` for a local
+   `hw_server`, or for example `tcp:192.0.2.40:3121` for a remote server.
+6. Enter the Station computer's TFTP IPv4 address. This must be the address
+   the target board can route to; do not use `127.0.0.1` for a physical board.
+7. Optionally enter the board IPv4 address. When supplied, the TFTP server
+   rejects requests from other client addresses.
+8. Start the job and follow the ordered event log.
+
+A job succeeds only when XSDB exits successfully and every file below the
+artifact's `tftpRoot` has been requested and transferred. Canceling a queued
+or running job is supported from the dashboard.
+
+Starting a JTAG job can reset or reconfigure attached hardware. Confirm the
+selected cable and board before starting it.
+
+## Boot with `mnc deploy`
+
+The MSAP1 workspace command uses the same HTTP API as the browser. Start the
+Station first, then configure `MncBuildPreset.yaml` in the product workspace:
+
+```yaml
+version: 1
+stages:
+  deploy:
+    type: jtag
+    station_url: http://127.0.0.1:8042
+    xilinx_hw_server_url: tcp:172.30.19.20:3121
+    tftp_server_ip: 172.30.19.19
+    board_ip: null
+```
+
+Run:
+
+```bash
+./mnc deploy
+```
+
+For MSAP1, `mnc` reads the stable artifact from:
+
+```text
+yocto-build/build/export/provision-image/msap1-jtag-image.tar.gz
+```
+
+It validates Station availability, uploads the artifact, queues the job, and
+prints job events until completion. Command-line settings override the preset:
+
+```bash
+./mnc deploy jtag \
+  --station-url http://127.0.0.1:8042 \
+  --xilinx-hw-server-url tcp:172.30.19.20:3121 \
+  --tftp-server-ip 172.30.19.19 \
+  --board-ip 172.30.19.10
+```
+
+Set `MNC_STATION_TOKEN` before running `mnc deploy` when the Station API uses
+bearer authentication.
+
+## Runtime configuration
+
+The commonly used settings are:
+
+| Command option | Environment variable | Default |
+| --- | --- | --- |
+| `--http-listen` | `MNC_STATION_HTTP_LISTEN` | `127.0.0.1:8042` |
+| `--tftp-listen` | `MNC_STATION_TFTP_LISTEN` | `:69` |
+| `--data-dir` | `MNC_STATION_DATA_DIR` | Platform user configuration directory |
+| `--xsdb-path` | `MNC_XSDB` | Search Xilinx environment and `PATH` |
+| `--api-token-file` | `MNC_STATION_TOKEN_FILE` | Not set |
+| — | `MNC_STATION_TOKEN` | Not set |
+| `--job-timeout` | — | `10m` |
+| `--max-artifact-bytes` | — | 2 GiB |
+| `--max-unpacked-bytes` | — | 8 GiB |
+
+Run `mnc-station serve -help` for the complete option list.
+
+On a normal user launch, data is stored below the operating system's user
+configuration directory. Typical locations are:
+
+- Linux: `${XDG_CONFIG_HOME:-$HOME/.config}/Monutchee/Provisioning-Station`
+- Windows: `%AppData%\Monutchee\Provisioning-Station`
+- Debian service: `/var/lib/mnc-station`
+
+The data directory contains retained artifacts and persistent job/event
+records. Do not edit it while the Station is running.
+
+## API authentication and remote access
+
+The default loopback listener is appropriate for local browser and `mnc`
+control. The Station refuses a non-loopback HTTP listener unless a bearer token
+of at least 16 characters is configured.
+
+On Linux, create a token file that is readable only by the service account and
+set `MNC_STATION_TOKEN_FILE` in `/etc/default/mnc-station`. For a foreground
+development session, an environment variable can be used:
+
+```bash
+export MNC_STATION_TOKEN='replace-with-a-long-random-token'
+mnc-station serve --http-listen=192.0.2.30:8042
+```
+
+The browser asks for the token, and command-line clients read
+`MNC_STATION_TOKEN`. A bearer token authenticates requests but does not encrypt
+HTTP traffic. Put a trusted TLS or mutually authenticated reverse proxy in
+front of the Station before allowing control from outside a trusted station
+network. The health endpoint remains public.
+
+The full automation contract is documented in
+[`api/openapi.yaml`](../api/openapi.yaml).
+
+## Troubleshooting
+
+### XSDB is unavailable
+
+- Run `xsdb -eval "puts ok"` from the same shell or service account.
+- Set `MNC_XSDB` or pass `--xsdb-path` with the full `xsdb`/`xsdb.bat` path.
+- When using the Linux service, update `/etc/default/mnc-station` and restart
+  the service.
+- XSDB must be installed on the Station computer even when `hw_server` is
+  remote.
+
+### The TFTP listener cannot start
+
+- Check whether another TFTP service already owns UDP port 69.
+- On Linux, use the Debian service or apply `cap_net_bind_service` to the
+  portable binary.
+- On Windows, allow the Station executable through the firewall on the trusted
+  network profile.
+
+### XSDB connects, but the board does not fetch files
+
+- Verify that `tftp_server_ip` is the Station interface reachable from the
+  board, not the `hw_server` address unless they are the same machine.
+- Check the provisioning VLAN, routing, host firewall, and board netmask.
+- If `board_ip` is configured, make sure it matches the source address used by
+  the board's TFTP client.
+- Inspect the job event log to see which expected files were requested.
+
+### The remote hardware server cannot be reached
+
+- Confirm that `hw_server` is running and listening on the configured port.
+- Use the exact `tcp:<host>:<port>` form.
+- Test TCP connectivity from the Station computer and check firewalls between
+  the two hosts.
+
+### A job remains queued
+
+The Station intentionally serializes hardware access. Wait for the active job
+to finish or cancel it. If the agent was restarted during a job, that
+interrupted job is marked failed and the next queued job can run.
+
+## Current scope
+
+The Station currently executes Xilinx `jtag-boot` artifacts with the
+`xilinx-xsdb` executor. Cloud enrollment, manufacturing records, secure-boot
+signing, Azure IoT key issuance, NXP UUU, and WIC media flashing are future
+components and are not implemented here.
