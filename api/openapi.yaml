@@ -4,7 +4,11 @@ info:
   version: 1.0.0
   description: Local hardware provisioning API. Cloud orchestration is outside this service.
 servers:
-  - url: http://127.0.0.1:8042/api/v1
+  - url: http://{station}:8042/api/v1
+    variables:
+      station:
+        default: 127.0.0.1
+        description: Provisioning Station hostname or IPv4 address
 security:
   - bearerAuth: []
 paths:

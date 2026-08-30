@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -116,7 +118,7 @@ func defaultServeConfig() (serveConfig, error) {
 	}
 	limits := artifact.DefaultLimits()
 	return serveConfig{
-		HTTPListen:           environmentOr("MNC_STATION_HTTP_LISTEN", "127.0.0.1:8042"),
+		HTTPListen:           environmentOr("MNC_STATION_HTTP_LISTEN", "0.0.0.0:8042"),
 		TFTPListen:           environmentOr("MNC_STATION_TFTP_LISTEN", ":69"),
 		DataDir:              environmentOr("MNC_STATION_DATA_DIR", filepath.Join(configDirectory, "Monutchee", "Provisioning-Station")),
 		XSDBPath:             os.Getenv("MNC_XSDB"),
@@ -135,12 +137,9 @@ func serve(config serveConfig) error {
 	if config.JobTimeout <= 0 {
 		return fmt.Errorf("job timeout must be positive")
 	}
-	token, err := loadAPIToken(config.APIToken, config.TokenFile)
+	token, tokenFile, err := resolveAPIToken(config)
 	if err != nil {
 		return err
-	}
-	if !isLoopbackListen(config.HTTPListen) && token == "" {
-		return fmt.Errorf("refusing non-loopback HTTP listener %q without MNC_STATION_TOKEN or --api-token-file", config.HTTPListen)
 	}
 
 	limits := artifact.DefaultLimits()
@@ -184,6 +183,11 @@ func serve(config serveConfig) error {
 	fmt.Printf("Monutchee Provisioning Station %s\n", version)
 	fmt.Printf("Dashboard: %s\n", url)
 	fmt.Printf("TFTP jobs: %s\n", config.TFTPListen)
+	if tokenFile != "" {
+		fmt.Printf("API authentication: required (token file %s)\n", tokenFile)
+	} else if token != "" {
+		fmt.Println("API authentication: required")
+	}
 	if path, resolveErr := executor.Resolve(); resolveErr == nil {
 		fmt.Printf("XSDB: %s\n", path)
 	} else {
@@ -272,12 +276,74 @@ func loadAPIToken(environmentToken, tokenFile string) (string, error) {
 			return "", fmt.Errorf("read API token file: %w", err)
 		}
 		token = strings.TrimSpace(string(data))
+		if token == "" {
+			return "", fmt.Errorf("API token file must not be empty: %s", tokenFile)
+		}
 	}
 	if strings.ContainsAny(token, "\r\n\x00") {
 		return "", fmt.Errorf("API token must be a single non-empty line")
 	}
 	if token != "" && len(token) < 16 {
 		return "", fmt.Errorf("API token must contain at least 16 characters")
+	}
+	return token, nil
+}
+
+func resolveAPIToken(config serveConfig) (string, string, error) {
+	token, err := loadAPIToken(config.APIToken, config.TokenFile)
+	if err != nil {
+		return "", "", err
+	}
+	if token != "" {
+		return token, config.TokenFile, nil
+	}
+	if isLoopbackListen(config.HTTPListen) {
+		return "", "", nil
+	}
+
+	tokenFile := filepath.Join(config.DataDir, "api-token")
+	token, err = loadOrCreateAPIToken(tokenFile)
+	if err != nil {
+		return "", "", fmt.Errorf("prepare API token for non-loopback listener %q: %w", config.HTTPListen, err)
+	}
+	return token, tokenFile, nil
+}
+
+func loadOrCreateAPIToken(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err == nil {
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("managed API token path is not a regular file: %s", path)
+		}
+		return loadAPIToken("", path)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("inspect managed API token: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return "", fmt.Errorf("create API token directory: %w", err)
+	}
+
+	random := make([]byte, 24)
+	if _, err := rand.Read(random); err != nil {
+		return "", fmt.Errorf("generate API token: %w", err)
+	}
+	token := hex.EncodeToString(random)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if errors.Is(err, os.ErrExist) {
+		return loadAPIToken("", path)
+	}
+	if err != nil {
+		return "", fmt.Errorf("create managed API token: %w", err)
+	}
+	if _, err := fmt.Fprintln(file, token); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", fmt.Errorf("write managed API token: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("close managed API token: %w", err)
 	}
 	return token, nil
 }

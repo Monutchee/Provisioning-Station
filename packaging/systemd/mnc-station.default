@@ -2,6 +2,10 @@
 # Point this at xsdb when the system service cannot discover the Xilinx install.
 # MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
 
-# Required before changing the HTTP listener to a non-loopback address.
-# Prefer MNC_STATION_TOKEN_FILE for production secrets.
+# The packaged service listens on every IPv4 interface by default. Override it
+# with the following setting when the dashboard must be local-only.
+# MNC_STATION_HTTP_LISTEN=127.0.0.1:8042
+
+# A non-loopback listener automatically creates
+# /var/lib/mnc-station/api-token. Set this to use a managed token instead.
 # MNC_STATION_TOKEN_FILE=/etc/mnc-station/token
