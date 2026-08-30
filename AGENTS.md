@@ -21,8 +21,8 @@
   handing off a change that affects runtime behavior.
 - Keep the production binary dependency-light and embed the browser assets so
   installation never requires Node.js or a separate web server.
-- The default HTTP listener must remain loopback-only. A non-loopback listener
-  requires an API token.
+- The default HTTP listener accepts IPv4 LAN connections. A non-loopback
+  listener must always require an explicit or automatically managed API token.
 - Never log API tokens, signing material, or future device credentials.
 - Physical JTAG tests reset connected hardware. Resolve the selected target
   and obtain explicit user authorization before running one.

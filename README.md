@@ -63,9 +63,12 @@ MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb \
   ./mnc-station serve --open-browser
 ```
 
-The dashboard is served at `http://127.0.0.1:8042/`. An explicit XSDB path can
-also be passed with `--xsdb-path`. If neither is set, the agent checks `PATH`,
-`XILINX_VITIS`, and `XILINX_VIVADO`.
+The agent listens on `0.0.0.0:8042` by default. Open the dashboard locally at
+`http://127.0.0.1:8042/`, or remotely at
+`http://<station-ip-or-hostname>:8042/`. Use HTTP, not HTTPS, unless a TLS
+reverse proxy has been configured. An explicit XSDB path can also be passed
+with `--xsdb-path`. If neither is set, the agent checks `PATH`, `XILINX_VITIS`,
+and `XILINX_VIVADO`.
 
 Real boards request TFTP on UDP port 69. On Linux, install the deb/service (it
 has only the narrow low-port capability) or grant that capability to a local
@@ -106,16 +109,18 @@ The most useful service flags and environment variables are:
 
 | Flag | Environment | Default |
 | --- | --- | --- |
-| `--http-listen` | `MNC_STATION_HTTP_LISTEN` | `127.0.0.1:8042` |
+| `--http-listen` | `MNC_STATION_HTTP_LISTEN` | `0.0.0.0:8042` |
 | `--tftp-listen` | `MNC_STATION_TFTP_LISTEN` | `:69` |
 | `--data-dir` | `MNC_STATION_DATA_DIR` | platform user config directory |
 | `--xsdb-path` | `MNC_XSDB` | auto-detect |
 | `--api-token-file` | `MNC_STATION_TOKEN_FILE` | none |
 
-`MNC_STATION_TOKEN` can supply the token directly. The agent refuses to bind
-the HTTP API to a non-loopback address unless a token of at least 16 characters
-is configured. Put TLS or a mutually authenticated reverse proxy in front of
-the agent before exposing it beyond a trusted station network.
+`MNC_STATION_TOKEN` can supply the token directly. When listening on a
+non-loopback address without an explicitly configured token, the agent creates
+a private `api-token` file in its data directory. The Debian service stores it
+at `/var/lib/mnc-station/api-token`; enter that token when the dashboard asks.
+Put TLS or a mutually authenticated reverse proxy in front of the agent before
+exposing it beyond a trusted station network.
 
 ## HTTP API
 

@@ -8,7 +8,7 @@ Type=simple
 User=mnc-station
 Group=mnc-station
 EnvironmentFile=-/etc/default/mnc-station
-ExecStart=/usr/bin/mnc-station serve --http-listen=127.0.0.1:8042 --tftp-listen=:69 --data-dir=/var/lib/mnc-station
+ExecStart=/usr/bin/mnc-station serve --tftp-listen=:69 --data-dir=/var/lib/mnc-station
 Restart=on-failure
 RestartSec=2s
 AmbientCapabilities=CAP_NET_BIND_SERVICE

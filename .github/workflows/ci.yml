@@ -60,3 +60,6 @@ jobs:
           test -f build/release-ci/mnc-station_0.0.0+012345_linux_amd64.tar.gz
           test -f build/release-ci/mnc-station_0.0.0+012345_linux_arm64.tar.gz
           test -f build/release-ci/mnc-station_0.0.0+012345_windows_amd64.zip
+          test -f build/release-ci/mnc-station_0.0.0+012345_amd64.deb
+          dpkg-deb -x build/release-ci/mnc-station_0.0.0+012345_amd64.deb build/release-ci/deb-root
+          grep -Fq 'ExecStart=/usr/bin/mnc-station serve --tftp-listen=:69 --data-dir=/var/lib/mnc-station' build/release-ci/deb-root/lib/systemd/system/mnc-station.service

@@ -13,7 +13,7 @@ Xilinx installation.
 ```text
 Browser or mnc deploy
         |
-        | HTTP API (default 127.0.0.1:8042)
+        | HTTP API (default 0.0.0.0:8042)
         v
 Provisioning Station
    |             |
@@ -108,8 +108,23 @@ systemctl status mnc-station
 journalctl -u mnc-station -f
 ```
 
-The service dashboard is available at `http://127.0.0.1:8042/`, and persistent
-artifacts and jobs are stored under `/var/lib/mnc-station`.
+The service listens on every IPv4 interface. From another computer, open:
+
+```text
+http://<station-ip-or-hostname>:8042/
+```
+
+Use `http://`, not `https://`, unless you configured a TLS reverse proxy. The
+dashboard asks for the automatically generated API token. Read it on the
+Station computer with:
+
+```bash
+sudo cat /var/lib/mnc-station/api-token
+```
+
+Persistent artifacts, jobs, and the managed token are stored under
+`/var/lib/mnc-station`. If the page is still unreachable, allow TCP port 8042
+through the Station firewall for the trusted provisioning network.
 
 ## Start the Station on Windows
 
@@ -121,28 +136,32 @@ $env:MNC_XSDB = "C:\Xilinx\Vitis\2025.2\bin\xsdb.bat"
 .\mnc-station.exe serve --open-browser
 ```
 
-The browser opens `http://127.0.0.1:8042/`. Allow the Station executable to
-receive TFTP traffic through Windows Defender Firewall on the trusted
-provisioning network. If the MSI Start menu shortcut is used, configure
-`MNC_XSDB` as a persistent user or system environment variable, or make XSDB
-available on `PATH`.
+The browser opens `http://127.0.0.1:8042/`, while remote clients can use the
+Windows computer's hostname or IP address with port 8042. The generated token
+is `%AppData%\Monutchee\Provisioning-Station\api-token`. Allow the Station
+executable to receive TCP port 8042 and TFTP traffic through Windows Defender
+Firewall on the trusted provisioning network. If the MSI Start menu shortcut
+is used, configure `MNC_XSDB` as a persistent user or system environment
+variable, or make XSDB available on `PATH`.
 
 Stop a foreground Station with `Ctrl+C` on either platform.
 
 ## Boot from the browser dashboard
 
-1. Open `http://127.0.0.1:8042/`.
-2. Confirm that the agent reports **XSDB available**.
-3. Drop `msap1-jtag-image.tar.gz` onto the artifact area, or select it using
+1. Open `http://127.0.0.1:8042/` locally, or
+   `http://<station-ip-or-hostname>:8042/` remotely.
+2. Enter the Station API token when prompted.
+3. Confirm that the agent reports **XSDB available**.
+4. Drop `msap1-jtag-image.tar.gz` onto the artifact area, or select it using
    the file picker.
-4. Select the imported artifact.
-5. Enter the hardware-server URL. Use `tcp:127.0.0.1:3121` for a local
+5. Select the imported artifact.
+6. Enter the hardware-server URL. Use `tcp:127.0.0.1:3121` for a local
    `hw_server`, or for example `tcp:192.0.2.40:3121` for a remote server.
-6. Enter the Station computer's TFTP IPv4 address. This must be the address
+7. Enter the Station computer's TFTP IPv4 address. This must be the address
    the target board can route to; do not use `127.0.0.1` for a physical board.
-7. Optionally enter the board IPv4 address. When supplied, the TFTP server
+8. Optionally enter the board IPv4 address. When supplied, the TFTP server
    rejects requests from other client addresses.
-8. Start the job and follow the ordered event log.
+9. Start the job and follow the ordered event log.
 
 A job succeeds only when XSDB exits successfully and every file below the
 artifact's `tftpRoot` has been requested and transferred. Canceling a queued
@@ -199,7 +218,7 @@ The commonly used settings are:
 
 | Command option | Environment variable | Default |
 | --- | --- | --- |
-| `--http-listen` | `MNC_STATION_HTTP_LISTEN` | `127.0.0.1:8042` |
+| `--http-listen` | `MNC_STATION_HTTP_LISTEN` | `0.0.0.0:8042` |
 | `--tftp-listen` | `MNC_STATION_TFTP_LISTEN` | `:69` |
 | `--data-dir` | `MNC_STATION_DATA_DIR` | Platform user configuration directory |
 | `--xsdb-path` | `MNC_XSDB` | Search Xilinx environment and `PATH` |
@@ -223,13 +242,18 @@ records. Do not edit it while the Station is running.
 
 ## API authentication and remote access
 
-The default loopback listener is appropriate for local browser and `mnc`
-control. The Station refuses a non-loopback HTTP listener unless a bearer token
-of at least 16 characters is configured.
+The default listener accepts IPv4 LAN connections. To keep remote provisioning
+control authenticated, the Station creates a random 48-character token at
+`<data-dir>/api-token` when no token was explicitly configured. A loopback-only
+listener can run without authentication:
 
-On Linux, create a token file that is readable only by the service account and
-set `MNC_STATION_TOKEN_FILE` in `/etc/default/mnc-station`. For a foreground
-development session, an environment variable can be used:
+```bash
+mnc-station serve --http-listen=127.0.0.1:8042
+```
+
+To provide your own token on Linux, create a file readable only by the service
+account and set `MNC_STATION_TOKEN_FILE` in `/etc/default/mnc-station`. For a
+foreground development session, an environment variable can be used:
 
 ```bash
 export MNC_STATION_TOKEN='replace-with-a-long-random-token'
@@ -246,6 +270,19 @@ The full automation contract is documented in
 [`api/openapi.yaml`](../api/openapi.yaml).
 
 ## Troubleshooting
+
+### The dashboard cannot be reached remotely
+
+- Include the port and use `http://<station-ip-or-hostname>:8042/`. The agent
+  does not provide HTTPS directly.
+- Run `sudo ss -ltnp | grep ':8042'` and confirm the listener is
+  `0.0.0.0:8042`.
+- Check `systemctl status mnc-station` and
+  `journalctl -u mnc-station --no-pager -n 100`.
+- Allow TCP port 8042 through the firewall only on the trusted provisioning
+  network.
+- Do not launch a second `mnc-station` process while the packaged systemd
+  service owns the port.
 
 ### XSDB is unavailable
 
