@@ -107,6 +107,9 @@ for arch in amd64 arm64; do
         "${PROJECT_ROOT}/doc/BUILDING.md" "${root}/doc/"
     install -d -m 0755 "${root}/api"
     install -m 0644 "${PROJECT_ROOT}/api/openapi.yaml" "${root}/api/"
+    install -d -m 0755 "${root}/completion"
+    install -m 0644 "${PROJECT_ROOT}/packaging/bash-completion/mnc-station" \
+        "${root}/completion/mnc-station.bash"
     tar -C "${STAGING}" -czf "${OUTPUT_DIR}/${package}.tar.gz" "${package}"
     if command -v dpkg-deb >/dev/null 2>&1; then
         "${PROJECT_ROOT}/packaging/debian/build-deb.sh" \

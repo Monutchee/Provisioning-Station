@@ -221,6 +221,7 @@ sudo apt install ./release/mnc-station_0.1.0+a1b2c3_amd64.deb
 The package installs:
 
 - `/usr/bin/mnc-station`
+- `/usr/share/bash-completion/completions/mnc-station`
 - `/lib/systemd/system/mnc-station.service`
 - `/etc/default/mnc-station`
 - `/var/lib/mnc-station`
@@ -363,6 +364,21 @@ privileged port 69 and do not contact external hosts.
 
 Install Debian packaging tools, or use the tar/zip outputs when a `.deb` is not
 needed.
+
+### `dpkg` reports that a newer local build is a downgrade
+
+Six-character Git or random hexadecimal IDs identify content but do not encode
+build order. Debian compares the complete version string, so for example
+`0.0.1+08b762` sorts before `0.0.1+bf7649` regardless of which package was
+built later. This warning does not mean the package is corrupt.
+
+Use a numeric UTC build ID when packages with the same base version must sort
+in build order:
+
+```bash
+MNC_STATION_BUILD_ID="$(date -u +%Y%m%d%H%M%S)" \
+  ./packaging/build-release.sh 0.0.1 release
+```
 
 ### `wix` is not recognized
 

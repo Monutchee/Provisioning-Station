@@ -126,6 +126,17 @@ Persistent artifacts, jobs, and the managed token are stored under
 `/var/lib/mnc-station`. If the page is still unreachable, allow TCP port 8042
 through the Station firewall for the trusted provisioning network.
 
+The Debian package installs Bash completion for commands and options. Start a
+new Bash shell after installation, or load it immediately with:
+
+```bash
+source /usr/share/bash-completion/completions/mnc-station
+```
+
+You can then use completion after `mnc-station`, `mnc-station serve`, and
+`mnc-station inspect`. Linux portable archives provide the same script at
+`completion/mnc-station.bash` inside the extracted directory.
+
 ## Start the Station on Windows
 
 Open PowerShell or a Xilinx command prompt and provide the path to `xsdb.bat`
