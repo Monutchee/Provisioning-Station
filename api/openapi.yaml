@@ -239,7 +239,7 @@ components:
           format: date-time
     Capabilities:
       type: object
-      required: [apiVersion, version, artifact, executors, operations, tftpListen, xsdb, authRequired]
+      required: [apiVersion, version, artifact, executors, operations, tftpListen, network, xsdb, authRequired]
       properties:
         apiVersion:
           const: v1
@@ -269,6 +269,32 @@ components:
             type: string
         tftpListen:
           type: string
+        network:
+          type: object
+          required: [ipv4Addresses, ipv4Interfaces]
+          properties:
+            preferredTftpServerIp:
+              type: string
+              format: ipv4
+              description: Best detected Station address for target TFTP requests.
+            ipv4Addresses:
+              type: array
+              description: Usable non-loopback IPv4 addresses detected on the Station.
+              items:
+                type: string
+                format: ipv4
+            ipv4Interfaces:
+              type: array
+              description: Usable interfaces in operating-system order; the first is the default.
+              items:
+                type: object
+                required: [name, address]
+                properties:
+                  name:
+                    type: string
+                  address:
+                    type: string
+                    format: ipv4
         xsdb:
           type: object
           required: [available]

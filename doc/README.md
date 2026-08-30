@@ -119,8 +119,13 @@ dashboard asks for the automatically generated API token. Read it on the
 Station computer with:
 
 ```bash
-sudo cat /var/lib/mnc-station/api-token
+sudo mnc-station token --service
 ```
+
+The command prints only the token, making it convenient to paste into the
+dashboard or capture in a script. Treat its output as a password. The backing
+file remains `/var/lib/mnc-station/api-token`. If the service uses a custom
+token file, pass its path with `--api-token-file`.
 
 Persistent artifacts, jobs, and the managed token are stored under
 `/var/lib/mnc-station`. If the page is still unreachable, allow TCP port 8042
@@ -133,9 +138,10 @@ new Bash shell after installation, or load it immediately with:
 source /usr/share/bash-completion/completions/mnc-station
 ```
 
-You can then use completion after `mnc-station`, `mnc-station serve`, and
-`mnc-station inspect`. Linux portable archives provide the same script at
-`completion/mnc-station.bash` inside the extracted directory.
+You can then use completion after `mnc-station`, `mnc-station serve`,
+`mnc-station inspect`, and `mnc-station token`. Linux portable archives
+provide the same script at `completion/mnc-station.bash` inside the extracted
+directory.
 
 ## Start the Station on Windows
 
@@ -148,8 +154,9 @@ $env:MNC_XSDB = "C:\Xilinx\Vitis\2025.2\bin\xsdb.bat"
 ```
 
 The browser opens `http://127.0.0.1:8042/`, while remote clients can use the
-Windows computer's hostname or IP address with port 8042. The generated token
-is `%AppData%\Monutchee\Provisioning-Station\api-token`. Allow the Station
+Windows computer's hostname or IP address with port 8042. Show the generated
+token with `mnc-station.exe token`; its backing file is
+`%AppData%\Monutchee\Provisioning-Station\api-token`. Allow the Station
 executable to receive TCP port 8042 and TFTP traffic through Windows Defender
 Firewall on the trusted provisioning network. If the MSI Start menu shortcut
 is used, configure `MNC_XSDB` as a persistent user or system environment
@@ -168,8 +175,11 @@ Stop a foreground Station with `Ctrl+C` on either platform.
 5. Select the imported artifact.
 6. Enter the hardware-server URL. Use `tcp:127.0.0.1:3121` for a local
    `hw_server`, or for example `tcp:192.0.2.40:3121` for a remote server.
-7. Enter the Station computer's TFTP IPv4 address. This must be the address
-   the target board can route to; do not use `127.0.0.1` for a physical board.
+7. Verify the prefilled Station TFTP IPv4 address. The dashboard selects the
+   first usable interface reported by the operating system and lists every
+   detected interface/IP. On a multi-NIC Station, select an entry or manually
+   type the address the target board can route to; never use `127.0.0.1` for a
+   physical board.
 8. Optionally enter the board IPv4 address. When supplied, the TFTP server
    rejects requests from other client addresses.
 9. Start the job and follow the ordered event log.
