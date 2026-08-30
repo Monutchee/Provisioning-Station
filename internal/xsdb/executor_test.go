@@ -76,3 +76,82 @@ func TestRunPassesStationArgumentsAndCapturesOutput(t *testing.T) {
 		t.Fatalf("captured lines = %v", lines)
 	}
 }
+
+func TestResolvePrefersPathBeforeDefaultInstallRoot(t *testing.T) {
+	clearXSDBEnvironment(t)
+	pathDirectory := t.TempDir()
+	pathExecutable := writeTestXSDB(t, filepath.Join(pathDirectory, executableName("xsdb")))
+	installRoot := t.TempDir()
+	writeTestXSDB(t, filepath.Join(installRoot, "Vitis", "2099.1", "bin", executableName("xsdb")))
+	t.Setenv("PATH", pathDirectory)
+
+	resolved, err := (Executor{}).resolve([]string{installRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.Abs(pathExecutable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != want {
+		t.Fatalf("resolved=%q want=%q", resolved, want)
+	}
+}
+
+func TestResolveFindsNewestDefaultXilinxInstallation(t *testing.T) {
+	clearXSDBEnvironment(t)
+	t.Setenv("PATH", "")
+	installRoot := t.TempDir()
+	writeTestXSDB(t, filepath.Join(installRoot, "Vivado", "2024.2", "bin", executableName("xsdb")))
+	writeTestXSDB(t, filepath.Join(installRoot, "2025.2", "Vivado", "bin", executableName("xsdb")))
+	writeTestXSDB(t, filepath.Join(installRoot, "Vitis", "2025.10", "bin", executableName("xsdb")))
+	want := writeTestXSDB(t, filepath.Join(installRoot, "2026.1", "Vitis", "bin", executableName("xsdb")))
+
+	resolved, err := (Executor{}).resolve([]string{installRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err = filepath.Abs(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != want {
+		t.Fatalf("resolved=%q want=%q", resolved, want)
+	}
+}
+
+func TestDefaultInstallRootMatchesPlatform(t *testing.T) {
+	roots := defaultInstallRoots()
+	if len(roots) != 1 {
+		t.Fatalf("roots=%v", roots)
+	}
+	if runtime.GOOS == "windows" {
+		if roots[0] != `C:\Xilinx` {
+			t.Fatalf("roots=%v", roots)
+		}
+	} else if roots[0] != "/opt/Xilinx" {
+		t.Fatalf("roots=%v", roots)
+	}
+}
+
+func clearXSDBEnvironment(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"MNC_XSDB", "XILINX_VITIS", "XILINX_VIVADO"} {
+		t.Setenv(name, "")
+	}
+}
+
+func writeTestXSDB(t *testing.T, path string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "#!/bin/sh\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		content = "@echo off\r\nexit /b 0\r\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}

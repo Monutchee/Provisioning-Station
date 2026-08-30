@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,6 +35,10 @@ type Request struct {
 type LogFunc func(line string)
 
 func (executor Executor) Resolve() (string, error) {
+	return executor.resolve(defaultInstallRoots())
+}
+
+func (executor Executor) resolve(installRoots []string) (string, error) {
 	if executor.Path != "" {
 		return resolveCandidate(executor.Path)
 	}
@@ -53,7 +58,108 @@ func (executor Executor) Resolve() (string, error) {
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("xsdb was not found; set --xsdb-path, MNC_XSDB, or the Xilinx environment")
+	for _, root := range installRoots {
+		if path, err := findXSDBInInstallRoot(root); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf(
+		"xsdb was not found in PATH, XILINX_VITIS/XILINX_VIVADO, or the default install locations %s; set --xsdb-path or MNC_XSDB to override discovery",
+		strings.Join(installRoots, ", "),
+	)
+}
+
+func defaultInstallRoots() []string {
+	if runtime.GOOS == "windows" {
+		return []string{`C:\Xilinx`}
+	}
+	return []string{"/opt/Xilinx"}
+}
+
+func findXSDBInInstallRoot(root string) (string, error) {
+	name := executableName("xsdb")
+	patterns := []string{
+		filepath.Join(root, "Vitis", "*", "bin", name),
+		filepath.Join(root, "*", "Vitis", "bin", name),
+		filepath.Join(root, "Vivado", "*", "bin", name),
+		filepath.Join(root, "*", "Vivado", "bin", name),
+		filepath.Join(root, "bin", name),
+	}
+	var candidates []string
+	seen := make(map[string]struct{})
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return "", fmt.Errorf("search Xilinx install root %s: %w", root, err)
+		}
+		for _, candidate := range matches {
+			if _, exists := seen[candidate]; exists {
+				continue
+			}
+			if _, err := resolveCandidate(candidate); err != nil {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			candidates = append(candidates, candidate)
+		}
+	}
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("xsdb was not found below %s", root)
+	}
+	sort.SliceStable(candidates, func(first, second int) bool {
+		return compareVersions(candidateVersion(candidates[first], root), candidateVersion(candidates[second], root)) > 0
+	})
+	return filepath.Abs(candidates[0])
+}
+
+func candidateVersion(candidate, root string) []int {
+	relative, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return nil
+	}
+	for _, component := range strings.Split(relative, string(os.PathSeparator)) {
+		parts := strings.Split(component, ".")
+		if len(parts) < 2 {
+			continue
+		}
+		version := make([]int, len(parts))
+		valid := true
+		for index, part := range parts {
+			value, parseErr := strconv.Atoi(part)
+			if parseErr != nil {
+				valid = false
+				break
+			}
+			version[index] = value
+		}
+		if valid {
+			return version
+		}
+	}
+	return nil
+}
+
+func compareVersions(first, second []int) int {
+	length := len(first)
+	if len(second) > length {
+		length = len(second)
+	}
+	for index := 0; index < length; index++ {
+		var firstPart, secondPart int
+		if index < len(first) {
+			firstPart = first[index]
+		}
+		if index < len(second) {
+			secondPart = second[index]
+		}
+		if firstPart < secondPart {
+			return -1
+		}
+		if firstPart > secondPart {
+			return 1
+		}
+	}
+	return 0
 }
 
 func (executor Executor) Run(ctx context.Context, request Request, emit LogFunc) error {

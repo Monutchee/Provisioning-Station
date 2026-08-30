@@ -66,7 +66,9 @@ the future protected release pipeline.
 
 ## Start the Station on Linux
 
-Set the XSDB path when it is not already on `PATH`:
+The Station searches `PATH` first, followed by Xilinx environment variables
+and versioned installations below `/opt/Xilinx`. Set an explicit path only for
+a nonstandard installation or to select a specific XSDB version:
 
 ```bash
 export MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
@@ -93,8 +95,10 @@ only useful for development and automated tests.
 
 ### Linux system service
 
-The Debian package installs and enables `mnc-station.service`. Configure XSDB
-in `/etc/default/mnc-station`:
+The Debian package installs and enables `mnc-station.service`. The service has
+a smaller `PATH` than an interactive shell, but it automatically searches
+versioned Vivado and Vitis installations below `/opt/Xilinx`. To override the
+detected executable, configure XSDB in `/etc/default/mnc-station`:
 
 ```text
 MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
@@ -145,8 +149,10 @@ directory.
 
 ## Start the Station on Windows
 
-Open PowerShell or a Xilinx command prompt and provide the path to `xsdb.bat`
-when XSDB is not already discoverable:
+Open PowerShell or a Xilinx command prompt. The Station searches `PATH`, Xilinx
+environment variables, and versioned Vivado/Vitis installations below
+`C:\Xilinx`. Provide the path to `xsdb.bat` only when automatic discovery does
+not select the desired installation:
 
 ```powershell
 $env:MNC_XSDB = "C:\Xilinx\Vitis\2025.2\bin\xsdb.bat"
@@ -242,7 +248,7 @@ The commonly used settings are:
 | `--http-listen` | `MNC_STATION_HTTP_LISTEN` | `0.0.0.0:8042` |
 | `--tftp-listen` | `MNC_STATION_TFTP_LISTEN` | `:69` |
 | `--data-dir` | `MNC_STATION_DATA_DIR` | Platform user configuration directory |
-| `--xsdb-path` | `MNC_XSDB` | Search Xilinx environment and `PATH` |
+| `--xsdb-path` | `MNC_XSDB` | Search `PATH`, Xilinx environment, then default install root |
 | `--api-token-file` | `MNC_STATION_TOKEN_FILE` | Not set |
 | — | `MNC_STATION_TOKEN` | Not set |
 | `--job-timeout` | — | `10m` |
@@ -307,8 +313,14 @@ The full automation contract is documented in
 
 ### XSDB is unavailable
 
-- Run `xsdb -eval "puts ok"` from the same shell or service account.
-- Set `MNC_XSDB` or pass `--xsdb-path` with the full `xsdb`/`xsdb.bat` path.
+- Check the dashboard's XSDB status tooltip or service log for the searched
+  locations.
+- Run `xsdb -eval "puts ok"` from the same shell or service account. Remember
+  that the systemd service does not inherit your interactive shell's `PATH`.
+- The automatic search checks `PATH`, `XILINX_VITIS`, `XILINX_VIVADO`, and
+  `/opt/Xilinx` on Linux or `C:\Xilinx` on Windows.
+- Set `MNC_XSDB` or pass `--xsdb-path` with the full `xsdb`/`xsdb.bat` path to
+  override automatic discovery.
 - When using the Linux service, update `/etc/default/mnc-station` and restart
   the service.
 - XSDB must be installed on the Station computer even when `hw_server` is

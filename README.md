@@ -67,8 +67,9 @@ The agent listens on `0.0.0.0:8042` by default. Open the dashboard locally at
 `http://127.0.0.1:8042/`, or remotely at
 `http://<station-ip-or-hostname>:8042/`. Use HTTP, not HTTPS, unless a TLS
 reverse proxy has been configured. An explicit XSDB path can also be passed
-with `--xsdb-path`. If neither is set, the agent checks `PATH`, `XILINX_VITIS`,
-and `XILINX_VIVADO`.
+with `--xsdb-path`. If neither is set, the agent checks `PATH` first, then
+`XILINX_VITIS`/`XILINX_VIVADO`, and finally searches versioned Vivado and Vitis
+installations below `/opt/Xilinx` on Linux or `C:\Xilinx` on Windows.
 
 Real boards request TFTP on UDP port 69. On Linux, install the deb/service (it
 has only the narrow low-port capability) or grant that capability to a local
