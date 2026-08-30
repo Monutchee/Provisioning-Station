@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -50,7 +51,9 @@ func TestValidateAndExtract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm()&0o111 == 0 {
+	// Windows does not expose POSIX execute bits through os.FileMode. The tar
+	// header and manifest mode are still validated by ValidateAndExtract.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("loader mode = %o, want executable", info.Mode().Perm())
 	}
 }
