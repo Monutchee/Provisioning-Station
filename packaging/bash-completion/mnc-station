@@ -1,0 +1,74 @@
+# Copyright 2026 Monutchee
+# SPDX-License-Identifier: Apache-2.0
+
+_mnc_station_complete_files()
+{
+    local prefix="$1"
+    local value="$2"
+    local candidate
+
+    COMPREPLY=()
+    while IFS= read -r candidate; do
+        COMPREPLY+=("${prefix}${candidate}")
+    done < <(compgen -f -- "${value}")
+    compopt -o filenames 2>/dev/null || true
+}
+
+_mnc_station()
+{
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local prev=""
+    local command
+    local prefix
+    local value
+
+    if ((COMP_CWORD > 0)); then
+        prev="${COMP_WORDS[COMP_CWORD - 1]}"
+    fi
+
+    if ((COMP_CWORD == 1)); then
+        mapfile -t COMPREPLY < <(compgen -W 'serve inspect version help --version --help -version -h' -- "${cur}")
+        return
+    fi
+
+    command="${COMP_WORDS[1]}"
+    case "${command}" in
+        serve)
+            case "${cur}" in
+                --data-dir=*|-data-dir=*|--xsdb-path=*|-xsdb-path=*|--api-token-file=*|-api-token-file=*)
+                    prefix="${cur%%=*}="
+                    value="${cur#*=}"
+                    _mnc_station_complete_files "${prefix}" "${value}"
+                    return
+                    ;;
+            esac
+            case "${prev}" in
+                --data-dir|-data-dir|--xsdb-path|-xsdb-path|--api-token-file|-api-token-file)
+                    _mnc_station_complete_files "" "${cur}"
+                    return
+                    ;;
+                --http-listen|-http-listen|--tftp-listen|-tftp-listen|--max-artifact-bytes|-max-artifact-bytes|--max-unpacked-bytes|-max-unpacked-bytes)
+                    COMPREPLY=()
+                    return
+                    ;;
+                --job-timeout|-job-timeout)
+                    mapfile -t COMPREPLY < <(compgen -W '1m 5m 10m 30m 1h' -- "${cur}")
+                    return
+                    ;;
+            esac
+            mapfile -t COMPREPLY < <(compgen -W '--http-listen --tftp-listen --data-dir --xsdb-path --api-token-file --job-timeout --max-artifact-bytes --max-unpacked-bytes --open-browser --help -h' -- "${cur}")
+            ;;
+        inspect)
+            if [[ "${cur}" == -* ]]; then
+                mapfile -t COMPREPLY < <(compgen -W '--json --help -h' -- "${cur}")
+            else
+                _mnc_station_complete_files "" "${cur}"
+            fi
+            ;;
+        version|help|--version|--help|-version|-h)
+            COMPREPLY=()
+            ;;
+    esac
+}
+
+complete -F _mnc_station mnc-station

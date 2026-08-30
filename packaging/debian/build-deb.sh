@@ -34,6 +34,7 @@ install -d -m 0755 \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station" \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station/api" \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station/doc" \
+    "${PACKAGE_ROOT}/usr/share/bash-completion/completions" \
     "${PACKAGE_ROOT}/lib/systemd/system" \
     "${PACKAGE_ROOT}/etc/default" \
     "${PACKAGE_ROOT}/var/lib/mnc-station"
@@ -48,6 +49,8 @@ install -m 0644 "${PROJECT_ROOT}/doc/BUILDING.md" \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station/doc/BUILDING.md"
 install -m 0644 "${PROJECT_ROOT}/api/openapi.yaml" \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station/api/openapi.yaml"
+install -m 0644 "${PROJECT_ROOT}/packaging/bash-completion/mnc-station" \
+    "${PACKAGE_ROOT}/usr/share/bash-completion/completions/mnc-station"
 install -m 0644 "${PROJECT_ROOT}/packaging/systemd/mnc-station.service" \
     "${PACKAGE_ROOT}/lib/systemd/system/mnc-station.service"
 install -m 0644 "${PROJECT_ROOT}/packaging/systemd/mnc-station.default" \
@@ -62,6 +65,7 @@ Architecture: ${ARCH}
 Maintainer: Monutchee maintainers <21245380+lesterlo@users.noreply.github.com>
 Homepage: https://github.com/Monutchee/Provisioning-Station
 Depends: adduser
+Suggests: bash-completion
 Description: Local Monutchee hardware provisioning agent
  Validates Station artifacts and performs managed Xilinx JTAG/TFTP boot jobs.
 EOF
