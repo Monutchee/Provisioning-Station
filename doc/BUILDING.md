@@ -23,7 +23,7 @@ Required on every development platform:
 Additional Linux release tools:
 
 - GNU Make for the convenience targets.
-- Bash, `tar`, and `zip` for release archives.
+- Bash, GNU coreutils, `tar`, and `zip` for release archives.
 - `dpkg-deb` and `adduser` metadata support for Debian packages.
 - `libcap` tools to grant a portable binary access to UDP port 69.
 
@@ -170,25 +170,52 @@ Run the release builder on Linux:
 ./packaging/build-release.sh 0.1.0 release
 ```
 
-It builds:
+The script creates one random 6-character hexadecimal build ID per invocation,
+appends it as SemVer build metadata, and embeds the same full version in every
+binary and package. For example, build ID `a1b2c3` produces:
 
 ```text
-release/mnc-station_0.1.0_linux_amd64.tar.gz
-release/mnc-station_0.1.0_linux_arm64.tar.gz
-release/mnc-station_0.1.0_amd64.deb
-release/mnc-station_0.1.0_arm64.deb
-release/mnc-station_0.1.0_windows_amd64.zip
+release/mnc-station_0.1.0+a1b2c3_linux_amd64.tar.gz
+release/mnc-station_0.1.0+a1b2c3_linux_arm64.tar.gz
+release/mnc-station_0.1.0+a1b2c3_amd64.deb
+release/mnc-station_0.1.0+a1b2c3_arm64.deb
+release/mnc-station_0.1.0+a1b2c3_windows_amd64.zip
 ```
 
 The `.deb` files are emitted when `dpkg-deb` is installed. The release version
-must use `MAJOR.MINOR.PATCH` form.
+argument must use `MAJOR.MINOR.PATCH` form. Set `MNC_STATION_BUILD_ID` to 6–40
+hexadecimal characters when a repeatable build identifier is needed:
+
+```bash
+MNC_STATION_BUILD_ID=a1b2c3 \
+  ./packaging/build-release.sh 0.1.0 release
+```
+
+Six hexadecimal digits provide 16,777,216 possible identifiers. They are
+intended as a compact way to distinguish local builds, not as a monotonically
+increasing apt repository version. For an apt feed, provide an increasing
+numeric UTC identifier so newer builds always sort after older builds:
+
+```bash
+MNC_STATION_BUILD_ID="$(date -u +%Y%m%d%H%M%S)" \
+  ./packaging/build-release.sh 0.1.0 release
+```
+
+Before building, the script removes and recreates the output directory. For
+safety, that directory must be inside the repository, must not be a symlink,
+and must not contain Git-tracked files. Relative output paths are resolved from
+the repository root, even when the script is launched from another directory.
+
+The Windows ZIP is cross-compiled on Linux with `GOOS=windows` and contains
+`mnc-station.exe`. It does not run native Windows tests or build the MSI; those
+steps run in the Windows GitHub Actions jobs.
 
 Inspect and install a Debian package locally:
 
 ```bash
-dpkg-deb --info release/mnc-station_0.1.0_amd64.deb
-dpkg-deb --contents release/mnc-station_0.1.0_amd64.deb
-sudo apt install ./release/mnc-station_0.1.0_amd64.deb
+dpkg-deb --info release/mnc-station_0.1.0+a1b2c3_amd64.deb
+dpkg-deb --contents release/mnc-station_0.1.0+a1b2c3_amd64.deb
+sudo apt install ./release/mnc-station_0.1.0+a1b2c3_amd64.deb
 ```
 
 The package installs:

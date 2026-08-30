@@ -49,3 +49,14 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: windows
           GOARCH: amd64
+      - name: Verify release packaging and cleanup
+        env:
+          MNC_STATION_BUILD_ID: "012345"
+        run: |
+          mkdir -p build/release-ci
+          touch build/release-ci/stale-output
+          ./packaging/build-release.sh 0.0.0 build/release-ci
+          test ! -e build/release-ci/stale-output
+          test -f build/release-ci/mnc-station_0.0.0+012345_linux_amd64.tar.gz
+          test -f build/release-ci/mnc-station_0.0.0+012345_linux_arm64.tar.gz
+          test -f build/release-ci/mnc-station_0.0.0+012345_windows_amd64.zip
