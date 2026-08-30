@@ -285,8 +285,11 @@ The CI workflow runs on native Ubuntu and Windows workers. It performs:
 - Linux arm64 and Windows amd64 cross-compilation.
 
 The release workflow is triggered by a strict `vMAJOR.MINOR.PATCH` tag. It
-builds Linux archives, Debian packages, a Windows zip, a native Windows MSI,
-and SHA-256 checksums before creating the GitHub release.
+uses the first six hexadecimal characters of the tagged commit as the shared
+build ID, builds Linux archives, Debian packages, a Windows zip, a native
+Windows MSI, and SHA-256 checksums, and then creates a GitHub release. The
+workflow artifacts are temporary copies; the files attached to the GitHub
+release are the permanent release downloads.
 
 Before creating a release tag, run locally:
 
@@ -298,6 +301,32 @@ make cross
 ```
 
 Do not create a release tag until the Linux hardware smoke test is complete.
+
+Create and push an annotated tag when the commit is ready:
+
+```bash
+git tag -a v0.1.0 -m "Provisioning Station v0.1.0"
+git push origin v0.1.0
+```
+
+The tagged commit must contain `.github/workflows/release.yml`. After the tag
+is pushed, open the repository's **Actions** page to follow the `Release`
+workflow. When all jobs pass, the repository's **Releases** page contains:
+
+```text
+mnc-station_0.1.0+<build-id>_linux_amd64.tar.gz
+mnc-station_0.1.0+<build-id>_linux_arm64.tar.gz
+mnc-station_0.1.0+<build-id>_amd64.deb
+mnc-station_0.1.0+<build-id>_arm64.deb
+mnc-station_0.1.0+<build-id>_windows_amd64.zip
+mnc-station_0.1.0+<build-id>_windows_amd64.msi
+SHA256SUMS
+```
+
+The executable inside the MSI reports the complete
+`0.1.0+<build-id>` version. The MSI's internal Windows Installer version stays
+numeric (`0.1.0`) because Windows Installer does not accept Semantic Versioning
+build metadata in its three numeric product-version fields.
 
 ## Verification checklist
 

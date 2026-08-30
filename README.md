@@ -137,7 +137,9 @@ The API is rooted at `/api/v1`. Its OpenAPI description is
 Actions also runs the full test suite natively on both Ubuntu and Windows, so
 Windows compilation and socket behavior are checked even when development is
 done from Linux. Tagged releases produce tar/zip archives, a Debian package,
-and a Windows MSI.
+and a Windows MSI. Pushing an annotated `vMAJOR.MINOR.PATCH` tag creates a
+GitHub release and attaches every installer plus `SHA256SUMS`; see the
+[building guide](doc/BUILDING.md#continuous-integration-and-tagged-releases).
 
 The Windows installer places `mnc-station.exe` in Program Files. Run
 `mnc-station.exe serve --open-browser` from a Xilinx-enabled terminal, or set
