@@ -1,0 +1,369 @@
+openapi: 3.1.0
+info:
+  title: Monutchee Provisioning Station API
+  version: 1.0.0
+  description: Local hardware provisioning API. Cloud orchestration is outside this service.
+servers:
+  - url: http://127.0.0.1:8042/api/v1
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      summary: Check whether the local agent is alive
+      security: []
+      responses:
+        "200":
+          description: Healthy agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /capabilities:
+    get:
+      summary: Discover executors, artifact limits, and local tool availability
+      responses:
+        "200":
+          description: Agent capabilities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Capabilities"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /artifacts:
+    get:
+      summary: List imported artifacts
+      responses:
+        "200":
+          description: Imported artifacts, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [artifacts]
+                properties:
+                  artifacts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/StoredArtifact"
+    post:
+      summary: Validate and import one Station artifact
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [artifact]
+              properties:
+                artifact:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Verified content-addressed artifact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoredArtifact"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          description: Artifact exceeds a configured limit
+  /artifacts/{artifactId}:
+    parameters:
+      - $ref: "#/components/parameters/ArtifactId"
+    get:
+      summary: Read one imported artifact record
+      responses:
+        "200":
+          description: Artifact record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoredArtifact"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /jobs:
+    get:
+      summary: List provisioning jobs
+      responses:
+        "200":
+          description: Jobs, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobs]
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Job"
+    post:
+      summary: Validate and queue a provisioning job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobRequest"
+      responses:
+        "201":
+          description: Queued job
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /jobs/{jobId}:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    get:
+      summary: Read one provisioning job
+      responses:
+        "200":
+          description: Current job state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /jobs/{jobId}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    post:
+      summary: Cancel a queued or running job
+      responses:
+        "200":
+          description: Updated job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /jobs/{jobId}/events:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+      - name: after
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+        description: Return only events with a sequence greater than this value.
+    get:
+      summary: Read or stream ordered audit events
+      description: "Send `Accept: text/event-stream` for an SSE stream; otherwise JSON is returned."
+      responses:
+        "200":
+          description: Event history or stream
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Event"
+            text/event-stream:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    ArtifactId:
+      name: artifactId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    BadRequest:
+      description: Input failed validation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Health:
+      type: object
+      required: [status, version, apiVersion, time]
+      properties:
+        status:
+          const: ok
+        version:
+          type: string
+        apiVersion:
+          const: v1
+        time:
+          type: string
+          format: date-time
+    Capabilities:
+      type: object
+      required: [apiVersion, version, artifact, executors, operations, tftpListen, xsdb, authRequired]
+      properties:
+        apiVersion:
+          const: v1
+        version:
+          type: string
+        artifact:
+          type: object
+          required: [schema, formatVersions, maxCompressedBytes, maxUncompressedBytes]
+          properties:
+            schema:
+              const: mnc-station-artifact
+            formatVersions:
+              type: array
+              items:
+                type: integer
+            maxCompressedBytes:
+              type: integer
+            maxUncompressedBytes:
+              type: integer
+        executors:
+          type: array
+          items:
+            type: string
+        operations:
+          type: array
+          items:
+            type: string
+        tftpListen:
+          type: string
+        xsdb:
+          type: object
+          required: [available]
+          properties:
+            available:
+              type: boolean
+            path:
+              type: string
+            error:
+              type: string
+        authRequired:
+          type: boolean
+    StoredArtifact:
+      type: object
+      required: [id, importedUtc, compressedBytes, uncompressedBytes, hasSignature, manifest]
+      properties:
+        id:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        importedUtc:
+          type: string
+          format: date-time
+        compressedBytes:
+          type: integer
+          minimum: 1
+        uncompressedBytes:
+          type: integer
+          minimum: 1
+        hasSignature:
+          type: boolean
+        manifest:
+          type: object
+          description: Validated mnc-station-artifact v2 manifest.
+    JobRequest:
+      type: object
+      additionalProperties: false
+      required: [artifactId, hwServerUrl, tftpServerIp]
+      properties:
+        artifactId:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        hwServerUrl:
+          type: string
+          examples: ["tcp:127.0.0.1:3121"]
+        tftpServerIp:
+          type: string
+          format: ipv4
+        boardIp:
+          type: string
+          format: ipv4
+    Job:
+      type: object
+      required: [id, request, state, createdUtc, eventCount]
+      properties:
+        id:
+          type: string
+        request:
+          $ref: "#/components/schemas/JobRequest"
+        state:
+          type: string
+          enum: [queued, running, succeeded, failed, canceled]
+        createdUtc:
+          type: string
+          format: date-time
+        startedUtc:
+          type: string
+          format: date-time
+        finishedUtc:
+          type: string
+          format: date-time
+        error:
+          type: string
+        eventCount:
+          type: integer
+          minimum: 0
+    Event:
+      type: object
+      required: [sequence, time, level, message]
+      properties:
+        sequence:
+          type: integer
+          minimum: 1
+        time:
+          type: string
+          format: date-time
+        level:
+          type: string
+          enum: [info, warning, error]
+        message:
+          type: string
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string

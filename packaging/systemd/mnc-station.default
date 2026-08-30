@@ -1,0 +1,7 @@
+# Optional Provisioning Station environment.
+# Point this at xsdb when the system service cannot discover the Xilinx install.
+# MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
+
+# Required before changing the HTTP listener to a non-loopback address.
+# Prefer MNC_STATION_TOKEN_FILE for production secrets.
+# MNC_STATION_TOKEN_FILE=/etc/mnc-station/token
