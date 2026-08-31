@@ -144,13 +144,12 @@ async function discoverTargets() {
     const query = new URLSearchParams({ hwServerUrl: hardwareServerURL });
     const payload = await api(`/api/v1/xilinx/targets?${query}`);
     state.targets = payload.targets || [];
-    renderTargets();
     if (!state.targets.length) showFormError("No ZynqMP PSU targets were found on this hardware server.");
   } catch (error) {
-    renderTargets();
     showFormError(error.message);
   } finally {
     state.targetLoading = false;
+    renderTargets();
     elements["discover-targets"].disabled = false;
     elements["discover-targets"].textContent = "Scan devices";
     updateStartButton();
