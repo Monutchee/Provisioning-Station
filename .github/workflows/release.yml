@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      base_version: ${{ steps.version.outputs.base_version }}
+      build_id: ${{ steps.version.outputs.build_id }}
+      release_version: ${{ steps.version.outputs.release_version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            printf 'Release tag must use vMAJOR.MINOR.PATCH: %s\n' "${GITHUB_REF_NAME}" >&2
+            exit 2
+          fi
+
+          base_version="${GITHUB_REF_NAME#v}"
+          commit="$(git rev-list -n 1 "${GITHUB_REF_NAME}")"
+          build_id="${commit:0:6}"
+          {
+            printf 'base_version=%s\n' "${base_version}"
+            printf 'build_id=%s\n' "${build_id}"
+            printf 'release_version=%s+%s\n' "${base_version}" "${build_id}"
+          } >> "${GITHUB_OUTPUT}"
+          printf 'Release version: %s+%s\n' "${base_version}" "${build_id}"
+
+  archives:
+    needs: metadata
+    runs-on: ubuntu-latest
+    env:
+      MNC_STATION_BUILD_ID: ${{ needs.metadata.outputs.build_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build archives and Debian packages
+        run: ./packaging/build-release.sh "${GITHUB_REF_NAME}" release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-archives
+          path: release/*
+
+  windows-msi:
+    needs: metadata
+    runs-on: windows-latest
+    env:
+      BASE_VERSION: ${{ needs.metadata.outputs.base_version }}
+      RELEASE_VERSION: ${{ needs.metadata.outputs.release_version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build Windows binary
+        shell: pwsh
+        run: |
+          $commit = (git rev-parse HEAD).Trim()
+          $date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          New-Item -ItemType Directory -Force release\input | Out-Null
+          go build -trimpath -ldflags "-s -w -X main.version=$env:RELEASE_VERSION -X main.commit=$commit -X main.buildDate=$date" -o release\input\mnc-station.exe .\cmd\mnc-station
+      - name: Build MSI with WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 6.0.0
+          wix build -arch x64 -d Version=$env:BASE_VERSION -d SourceDir="$pwd\release\input" -o "release\mnc-station_$($env:RELEASE_VERSION)_windows_amd64.msi" packaging\windows\Product.wxs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-msi
+          path: release/*.msi
+
+  publish:
+    needs: [metadata, archives, windows-msi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+      - name: Create checksums
+        working-directory: release
+        run: sha256sum * > SHA256SUMS
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" release/* --verify-tag --generate-notes

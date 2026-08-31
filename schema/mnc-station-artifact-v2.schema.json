@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:monutchee:schema:mnc-station-artifact:v2",
+  "title": "Monutchee Station Artifact v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "formatVersion",
+    "artifact",
+    "executor",
+    "files"
+  ],
+  "properties": {
+    "schema": {
+      "const": "mnc-station-artifact"
+    },
+    "formatVersion": {
+      "const": 2
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "vendor",
+        "operation",
+        "product",
+        "machine",
+        "version",
+        "buildId",
+        "createdUtc"
+      ],
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "vendor": { "$ref": "#/$defs/identifier" },
+        "operation": { "$ref": "#/$defs/identifier" },
+        "product": { "$ref": "#/$defs/identifier" },
+        "machine": { "$ref": "#/$defs/identifier" },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^\\r\\n\\u0000]+$"
+        },
+        "buildId": { "$ref": "#/$defs/identifier" },
+        "createdUtc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        }
+      }
+    },
+    "executor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "entrypoint"],
+      "properties": {
+        "type": { "$ref": "#/$defs/identifier" },
+        "entrypoint": { "$ref": "#/$defs/relativePath" },
+        "tftpRoot": { "$ref": "#/$defs/relativePath" }
+      }
+    },
+    "files": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "allOf": [
+          { "$ref": "#/$defs/relativePath" },
+          { "not": { "enum": ["manifest.json", "manifest.sig"] } }
+        ]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["size", "sha256", "mode"],
+        "properties": {
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "mode": {
+            "enum": ["0644", "0755"]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*:)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)[^\\u0000-\\u001F\\u007F]+$"
+    }
+  }
+}
