@@ -88,6 +88,16 @@
             <span class="vendor" id="artifact-vendor">—</span>
             <h3 id="artifact-name">—</h3>
             <p id="artifact-details">—</p>
+            <dl class="artifact-metadata">
+              <div>
+                <dt>Artifact SHA-256</dt>
+                <dd id="artifact-sha">—</dd>
+              </div>
+              <div>
+                <dt>Built</dt>
+                <dd id="artifact-built">—</dd>
+              </div>
+            </dl>
           </div>
           <div class="verified"><span>✓</span> Verified</div>
         </article>
@@ -99,6 +109,18 @@
               <input id="hw-server-url" name="hwServerUrl" value="tcp:127.0.0.1:3121" spellcheck="false" required>
               <small>Local or remote Xilinx <code>hw_server</code></small>
             </label>
+            <div class="field wide target-picker">
+              <div class="target-picker-heading">
+                <div>
+                  <span>JTAG devices</span>
+                  <small>Select one or more boards to boot with this artifact</small>
+                </div>
+                <button id="discover-targets" type="button" class="button scan-button">Scan devices</button>
+              </div>
+              <div id="target-list" class="target-list" aria-live="polite">
+                <p>Scan the hardware server to select a device.</p>
+              </div>
+            </div>
             <label class="field">
               <span>TFTP server IPv4</span>
               <input id="tftp-server-ip" name="tftpServerIp" placeholder="192.168.1.10" inputmode="decimal" spellcheck="false" list="tftp-server-ip-options" required>

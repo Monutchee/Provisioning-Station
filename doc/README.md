@@ -43,7 +43,9 @@ Before starting a real JTAG boot, make sure that:
   normally `msap1-jtag-image.tar.gz` from the Yocto
   `build/export/provision-image/` directory.
 
-Only one provisioning job runs at a time. Additional jobs remain queued.
+Only one provisioning job runs at a time. Selecting multiple JTAG devices
+creates one job per device; the jobs remain queued and boot sequentially so
+they do not compete for the Station's TFTP listener.
 
 ## Validate an artifact first
 
@@ -112,15 +114,17 @@ systemctl status mnc-station
 journalctl -u mnc-station -f
 ```
 
-The service listens on every IPv4 interface. From another computer, open:
+The service listens on every IPv4 interface. A direct local connection at
+`http://127.0.0.1:8042/` skips token verification. From another computer, open:
 
 ```text
 http://<station-ip-or-hostname>:8042/
 ```
 
 Use `http://`, not `https://`, unless you configured a TLS reverse proxy. The
-dashboard asks for the automatically generated API token. Read it on the
-Station computer with:
+LAN connections ask for the automatically generated API token. Any `172.x`,
+`192.168.x`, or other non-loopback address requires authentication even when
+it belongs to the Station computer. Read the token with:
 
 ```bash
 sudo mnc-station token --service
@@ -159,9 +163,10 @@ $env:MNC_XSDB = "C:\Xilinx\Vitis\2025.2\bin\xsdb.bat"
 .\mnc-station.exe serve --open-browser
 ```
 
-The browser opens `http://127.0.0.1:8042/`, while remote clients can use the
-Windows computer's hostname or IP address with port 8042. Show the generated
-token with `mnc-station.exe token`; its backing file is
+The browser opens `http://127.0.0.1:8042/` without requiring a token, while
+remote clients can use the Windows computer's hostname or IP address with port
+8042 and must authenticate. Show the generated token with
+`mnc-station.exe token`; its backing file is
 `%AppData%\Monutchee\Provisioning-Station\api-token`. Allow the Station
 executable to receive TCP port 8042 and TFTP traffic through Windows Defender
 Firewall on the trusted provisioning network. If the MSI Start menu shortcut
@@ -174,21 +179,26 @@ Stop a foreground Station with `Ctrl+C` on either platform.
 
 1. Open `http://127.0.0.1:8042/` locally, or
    `http://<station-ip-or-hostname>:8042/` remotely.
-2. Enter the Station API token when prompted.
+2. Enter the Station API token when prompted. Direct `127.0.0.1` and `::1`
+   connections do not prompt for one.
 3. Confirm that the agent reports **XSDB available**.
 4. Drop `msap1-jtag-image.tar.gz` onto the artifact area, or select it using
    the file picker.
 5. Select the imported artifact.
 6. Enter the hardware-server URL. Use `tcp:127.0.0.1:3121` for a local
    `hw_server`, or for example `tcp:192.0.2.40:3121` for a remote server.
-7. Verify the prefilled Station TFTP IPv4 address. The dashboard selects the
+7. Scan the hardware server and select one or more JTAG devices. Cable serial,
+   device name/index, and XSDB target ID identify each entry. Multiple devices
+   create sequential jobs using the same artifact.
+8. Verify the prefilled Station TFTP IPv4 address. The dashboard selects the
    first usable interface reported by the operating system and lists every
    detected interface/IP. On a multi-NIC Station, select an entry or manually
    type the address the target board can route to; never use `127.0.0.1` for a
    physical board.
-8. Optionally enter the board IPv4 address. When supplied, the TFTP server
-   rejects requests from other client addresses.
-9. Start the job and follow the ordered event log.
+9. Optionally enter the board IPv4 address. When supplied, the TFTP server
+   rejects requests from other client addresses. Leave it empty for a
+   multi-device boot so DHCP can assign each board a unique address.
+10. Start the jobs and follow their ordered event logs.
 
 A job succeeds only when XSDB exits successfully and every file below the
 artifact's `tftpRoot` has been requested and transferred. Canceling a queued
@@ -196,6 +206,15 @@ or running job is supported from the dashboard.
 
 Starting a JTAG job can reset or reconfigure attached hardware. Confirm the
 selected cable and board before starting it.
+
+The artifact card displays the retained archive's full SHA-256 digest and the
+manifest's localized build date/time. The digest is also the artifact ID used
+by the API and content-addressed store.
+
+Targeted jobs require a Station artifact built with the multi-device loader.
+If an older imported artifact is selected, rebuild `msap1-jtag-image` in Yocto
+and import the newly generated archive; the Station rejects the old loader
+before touching hardware.
 
 ## Boot with `mnc deploy`
 

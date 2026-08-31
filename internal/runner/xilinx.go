@@ -4,8 +4,10 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,6 +19,8 @@ import (
 	"github.com/Monutchee/Provisioning-Station/internal/tftp"
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
+
+const targetSelectorMarker = "MNC_STATION_TARGET_SELECTOR_V1"
 
 type XSDBExecutor interface {
 	Resolve() (string, error)
@@ -103,6 +107,7 @@ func (runner *Xilinx) Run(
 		HWServerURL:   request.HWServerURL,
 		TFTPServerIP:  request.TFTPServerIP,
 		BoardIP:       request.BoardIP,
+		TargetID:      request.TargetID,
 		WorkingFolder: filepath.Dir(entrypoint),
 	}, func(line string) {
 		if line != "" {
@@ -170,6 +175,19 @@ func (runner *Xilinx) Validate(stored artifact.StoredArtifact, request jobs.Requ
 	}
 	if err := xsdb.ValidateIPv4("board IP", request.BoardIP, true); err != nil {
 		return err
+	}
+	if err := xsdb.ValidateTargetID(request.TargetID); err != nil {
+		return err
+	}
+	if request.TargetID != "" {
+		entrypoint := filepath.Join(stored.RootPath, filepath.FromSlash(manifest.Executor.Entrypoint))
+		loader, err := os.ReadFile(entrypoint)
+		if err != nil {
+			return fmt.Errorf("read Xilinx JTAG loader: %w", err)
+		}
+		if !bytes.Contains(loader, []byte(targetSelectorMarker)) {
+			return fmt.Errorf("artifact loader does not support selecting a JTAG device; rebuild the Station artifact")
+		}
 	}
 	if _, err := runner.config.Executor.Resolve(); err != nil {
 		return err

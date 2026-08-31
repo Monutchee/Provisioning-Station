@@ -42,7 +42,8 @@ agent exposes the stable boundary they can call later.
 - Content-addressed artifact storage with checksum, size, mode, ordering, and
   archive-path validation.
 - Persistent, serialized hardware jobs with cancellation and audit events.
-- Xilinx `xsdb` execution against `tcp:<host>:<port>` hardware-server URLs.
+- Xilinx target discovery and `xsdb` execution against
+  `tcp:<host>:<port>` hardware-server URLs, including queued multi-board boots.
 - A per-job, read-only TFTP server with RFC 1350 reads and `blksize`, `timeout`,
   and `tsize` option negotiation.
 - Linux service/deb packaging, Windows MSI authoring, release archives, and
@@ -98,7 +99,7 @@ and follows its events. It no longer needs to run XSDB itself. The Station
 loader receives:
 
 ```text
-<hw-server-url> <tftp-server-ipv4> [board-ipv4]
+<hw-server-url> <tftp-server-ipv4> [board-ipv4] [xsdb-target-id]
 ```
 
 Use `mnc-station inspect <artifact.tar.gz>` to validate and summarize an
@@ -116,8 +117,11 @@ The most useful service flags and environment variables are:
 | `--xsdb-path` | `MNC_XSDB` | auto-detect |
 | `--api-token-file` | `MNC_STATION_TOKEN_FILE` | none |
 
-`MNC_STATION_TOKEN` can supply the token directly. When listening on a
-non-loopback address without an explicitly configured token, the agent creates
+`MNC_STATION_TOKEN` can supply the token directly. Direct browser/API requests
+to an IP loopback URL such as `http://127.0.0.1:8042` or `http://[::1]:8042`
+do not require the token. A LAN URL—including any `172.x.x.x` address—still
+requires it. When listening on a non-loopback address without an explicitly
+configured token, the agent creates
 a private `api-token` file in its data directory. The Debian service stores it
 at `/var/lib/mnc-station/api-token`; display it with
 `sudo mnc-station token --service` and enter it when the dashboard asks.
@@ -130,13 +134,17 @@ The API is rooted at `/api/v1`. Its OpenAPI description is
 [`api/openapi.yaml`](api/openapi.yaml). The important flow is:
 
 1. `POST /api/v1/artifacts` with one multipart `artifact` file.
-2. `POST /api/v1/jobs` with the artifact ID and connection settings.
-3. Poll `GET /api/v1/jobs/{id}` and `GET /api/v1/jobs/{id}/events`, or request
+2. `GET /api/v1/xilinx/targets?hwServerUrl=...` to discover PSU targets.
+3. `POST /api/v1/jobs` with the artifact ID, connection settings, and selected
+   `targetId`. Submit one job per target for a multi-board boot.
+4. Poll `GET /api/v1/jobs/{id}` and `GET /api/v1/jobs/{id}/events`, or request
    `text/event-stream` for events.
-4. `POST /api/v1/jobs/{id}/cancel` when cancellation is needed.
+5. `POST /api/v1/jobs/{id}/cancel` when cancellation is needed.
 
-`GET /api/v1/health` is intentionally public. All other API endpoints require
-`Authorization: Bearer <token>` when authentication is configured.
+`GET /api/v1/health` is intentionally public. Other endpoints require
+`Authorization: Bearer <token>` when authentication is configured, except for
+direct IP-loopback requests. Hostnames and LAN addresses do not receive the
+loopback exception.
 
 ## Distribution and Windows testing
 

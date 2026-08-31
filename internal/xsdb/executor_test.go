@@ -25,6 +25,54 @@ func TestValidateHWServerURL(t *testing.T) {
 	}
 }
 
+func TestValidateTargetID(t *testing.T) {
+	for _, valid := range []string{"", "1", "42"} {
+		if err := ValidateTargetID(valid); err != nil {
+			t.Errorf("ValidateTargetID(%q) = %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"0", "-1", "01", "1.0", "1; puts bad"} {
+		if err := ValidateTargetID(invalid); err == nil {
+			t.Errorf("ValidateTargetID(%q) succeeded", invalid)
+		}
+	}
+}
+
+func TestParseTargets(t *testing.T) {
+	output := "XSDB banner\n" + targetMarker +
+		"\t37\t505355\t30\t78637a75346576\t446967696c656e7420555342\t\n"
+	targets, err := parseTargets([]byte(output))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].ID != "7" || targets[0].Name != "PSU" ||
+		targets[0].DeviceIndex != "0" || targets[0].DeviceName != "xczu4ev" ||
+		targets[0].CableName != "Digilent USB" || targets[0].CableSerial != "" {
+		t.Fatalf("targets = %+v", targets)
+	}
+}
+
+func TestDiscoverRunsXSDBAndParsesTargets(t *testing.T) {
+	directory := t.TempDir()
+	executable := filepath.Join(directory, "xsdb")
+	record := targetMarker + "\t39\t505355\t30\t78637a75346576\t446967696c656e7420555342\t53455249414c2d42"
+	script := "#!/bin/sh\nprintf '%s\\n' '" + record + "'\n"
+	if runtime.GOOS == "windows" {
+		executable += ".cmd"
+		script = "@echo off\r\necho " + record + "\r\n"
+	}
+	if err := os.WriteFile(executable, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targets, err := (Executor{Path: executable}).Discover(context.Background(), "tcp:127.0.0.1:3121")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].ID != "9" || targets[0].CableSerial != "SERIAL-B" {
+		t.Fatalf("targets = %+v", targets)
+	}
+}
+
 func TestLineWriterCombinesChunks(t *testing.T) {
 	var lines []string
 	writer := newLineWriter(func(line string) { lines = append(lines, line) })
@@ -59,6 +107,7 @@ func TestRunPassesStationArgumentsAndCapturesOutput(t *testing.T) {
 		HWServerURL:   "tcp:127.0.0.1:3121",
 		TFTPServerIP:  "192.0.2.10",
 		BoardIP:       "192.0.2.20",
+		TargetID:      "17",
 		WorkingFolder: directory,
 	}, func(line string) { lines = append(lines, line) })
 	if err != nil {
@@ -68,7 +117,7 @@ func TestRunPassesStationArgumentsAndCapturesOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := entrypoint + " tcp:127.0.0.1:3121 192.0.2.10 192.0.2.20"
+	want := entrypoint + " tcp:127.0.0.1:3121 192.0.2.10 192.0.2.20 17"
 	if strings.TrimSpace(string(arguments)) != want {
 		t.Fatalf("arguments = %q, want %q", strings.TrimSpace(string(arguments)), want)
 	}
