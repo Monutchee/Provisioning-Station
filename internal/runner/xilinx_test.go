@@ -80,6 +80,37 @@ func TestXilinxRejectsOldLoaderForTargetedJob(t *testing.T) {
 	}
 }
 
+func TestXilinxRejectsV1LoaderForStableTargetJob(t *testing.T) {
+	root := t.TempDir()
+	entrypoint := filepath.Join(root, "jtag", "load-jtag-image.tcl")
+	if err := os.MkdirAll(filepath.Dir(entrypoint), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entrypoint, []byte("# MNC_STATION_TARGET_SELECTOR_V1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hardwareRunner, err := NewXilinx(XilinxConfig{Executor: fakeXSDB{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = hardwareRunner.Validate(artifact.StoredArtifact{
+		RootPath: root,
+		Manifest: artifact.Manifest{
+			Artifact: artifact.ArtifactMetadata{Vendor: "xilinx", Operation: "jtag-boot"},
+			Executor: artifact.ExecutorMetadata{
+				Type: "xilinx-xsdb", Entrypoint: "jtag/load-jtag-image.tcl", TFTPRoot: "tftp",
+			},
+			Files: map[string]artifact.FileDescriptor{"tftp/Image": {}},
+		},
+	}, jobs.Request{
+		HWServerURL: "tcp:127.0.0.1:3121", TFTPServerIP: "192.0.2.10",
+		TargetID: "3", TargetCableSerial: "SERIAL-A", TargetDeviceIndex: "0",
+	})
+	if err == nil || !strings.Contains(err.Error(), "rebuild the Station artifact") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 type downloadingXSDB struct {
 	address  string
 	files    []string
@@ -114,7 +145,7 @@ func TestXilinxRunnerCompletesAfterEveryTFTPFile(t *testing.T) {
 
 	root := t.TempDir()
 	for name, content := range map[string]string{
-		"jtag/load-jtag-image.tcl": "# MNC_STATION_TARGET_SELECTOR_V1\nputs ok\n",
+		"jtag/load-jtag-image.tcl": "# MNC_STATION_TARGET_SELECTOR_V1\n# MNC_STATION_TARGET_SELECTOR_V2\nputs ok\n",
 		"tftp/Image":               "kernel",
 		"tftp/boot.scr":            "script",
 	} {
@@ -149,6 +180,7 @@ func TestXilinxRunnerCompletesAfterEveryTFTPFile(t *testing.T) {
 		Manifest: manifest, RootPath: root,
 	}, jobs.Request{
 		HWServerURL: "tcp:127.0.0.1:3121", TFTPServerIP: "127.0.0.1", TargetID: "7",
+		TargetCableSerial: "SERIAL-A", TargetDeviceIndex: "0",
 	}, func(_ string, message string) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
@@ -157,8 +189,9 @@ func TestXilinxRunnerCompletesAfterEveryTFTPFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request := <-requests; request.TargetID != "7" {
-		t.Fatalf("XSDB request target = %q, want 7", request.TargetID)
+	if request := <-requests; request.TargetID != "7" ||
+		request.TargetCableSerial != "SERIAL-A" || request.TargetDeviceIndex != "0" {
+		t.Fatalf("XSDB target request = %+v", request)
 	}
 	logMutex.Lock()
 	joined := strings.Join(logs, "\n")

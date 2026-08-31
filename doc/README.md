@@ -135,6 +135,19 @@ dashboard or capture in a script. Treat its output as a password. The backing
 file remains `/var/lib/mnc-station/api-token`. If the service uses a custom
 token file, pass its path with `--api-token-file`.
 
+If a managed service token is exposed, rotate it and restart the service:
+
+```bash
+sudo mnc-station token --rotate --service
+sudo systemctl restart mnc-station
+```
+
+The rotation command prints the replacement token. Update the dashboard,
+`MncBuildPreset.yaml`, and other clients before restarting. The running agent
+continues using the previous in-memory token until it is restarted. For a
+portable Linux or Windows installation, use `mnc-station token --rotate` (or
+`mnc-station.exe token --rotate`) and restart the foreground agent.
+
 Persistent artifacts, jobs, and the managed token are stored under
 `/var/lib/mnc-station`. If the page is still unreachable, allow TCP port 8042
 through the Station firewall for the trusted provisioning network.

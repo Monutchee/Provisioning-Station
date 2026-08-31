@@ -20,11 +20,13 @@ func (state State) Terminal() bool {
 }
 
 type Request struct {
-	ArtifactID   string `json:"artifactId"`
-	HWServerURL  string `json:"hwServerUrl"`
-	TFTPServerIP string `json:"tftpServerIp"`
-	BoardIP      string `json:"boardIp,omitempty"`
-	TargetID     string `json:"targetId,omitempty"`
+	ArtifactID        string `json:"artifactId"`
+	HWServerURL       string `json:"hwServerUrl"`
+	TFTPServerIP      string `json:"tftpServerIp"`
+	BoardIP           string `json:"boardIp,omitempty"`
+	TargetID          string `json:"targetId,omitempty"`
+	TargetCableSerial string `json:"targetCableSerial,omitempty"`
+	TargetDeviceIndex string `json:"targetDeviceIndex,omitempty"`
 }
 
 type Job struct {

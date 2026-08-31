@@ -25,12 +25,14 @@ type Executor struct {
 }
 
 type Request struct {
-	Entrypoint    string
-	HWServerURL   string
-	TFTPServerIP  string
-	BoardIP       string
-	TargetID      string
-	WorkingFolder string
+	Entrypoint        string
+	HWServerURL       string
+	TFTPServerIP      string
+	BoardIP           string
+	TargetID          string
+	TargetCableSerial string
+	TargetDeviceIndex string
+	WorkingFolder     string
 }
 
 type LogFunc func(line string)
@@ -180,6 +182,15 @@ func (executor Executor) Run(ctx context.Context, request Request, emit LogFunc)
 	if err := ValidateTargetID(request.TargetID); err != nil {
 		return err
 	}
+	if err := ValidateTargetCableSerial(request.TargetCableSerial); err != nil {
+		return err
+	}
+	if err := ValidateTargetDeviceIndex(request.TargetDeviceIndex); err != nil {
+		return err
+	}
+	if request.TargetDeviceIndex != "" && request.TargetCableSerial == "" {
+		return fmt.Errorf("XSDB target device index requires a target cable serial")
+	}
 	entrypoint, err := filepath.Abs(request.Entrypoint)
 	if err != nil {
 		return fmt.Errorf("resolve XSDB entrypoint: %w", err)
@@ -190,11 +201,17 @@ func (executor Executor) Run(ctx context.Context, request Request, emit LogFunc)
 	}
 
 	arguments := []string{entrypoint, request.HWServerURL, request.TFTPServerIP}
-	if request.BoardIP != "" || request.TargetID != "" {
+	if request.BoardIP != "" || request.TargetID != "" || request.TargetCableSerial != "" {
 		arguments = append(arguments, request.BoardIP)
 	}
-	if request.TargetID != "" {
+	if request.TargetID != "" || request.TargetCableSerial != "" {
 		arguments = append(arguments, request.TargetID)
+	}
+	if request.TargetCableSerial != "" {
+		arguments = append(arguments, request.TargetCableSerial)
+	}
+	if request.TargetDeviceIndex != "" {
+		arguments = append(arguments, request.TargetDeviceIndex)
 	}
 	command := newCommand(ctx, path, arguments...)
 	if request.WorkingFolder != "" {
@@ -242,6 +259,27 @@ func ValidateTargetID(value string) error {
 	id, err := strconv.Atoi(value)
 	if err != nil || id <= 0 || strconv.Itoa(id) != value {
 		return fmt.Errorf("XSDB target ID must be a positive decimal integer: %q", value)
+	}
+	return nil
+}
+
+func ValidateTargetCableSerial(value string) error {
+	if value == "" {
+		return nil
+	}
+	if len(value) > 256 || strings.ContainsAny(value, "\r\n\x00") {
+		return fmt.Errorf("JTAG cable serial must be a single line of at most 256 characters")
+	}
+	return nil
+}
+
+func ValidateTargetDeviceIndex(value string) error {
+	if value == "" {
+		return nil
+	}
+	index, err := strconv.Atoi(value)
+	if err != nil || index < 0 || strconv.Itoa(index) != value {
+		return fmt.Errorf("JTAG device index must be a non-negative decimal integer: %q", value)
 	}
 	return nil
 }

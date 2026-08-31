@@ -277,7 +277,8 @@ func runToken(arguments []string) error {
 	flags.SetOutput(os.Stderr)
 	dataDir := flags.String("data-dir", defaults.DataDir, "Station data directory containing the managed API token")
 	tokenFile := flags.String("api-token-file", defaults.TokenFile, "explicit API bearer token file")
-	service := flags.Bool("service", false, "show the Debian system service token")
+	service := flags.Bool("service", false, "use the Debian system service token file")
+	rotate := flags.Bool("rotate", false, "replace the managed API token and print the new value")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -288,12 +289,46 @@ func runToken(arguments []string) error {
 	config := defaults
 	config.DataDir = *dataDir
 	config.TokenFile = *tokenFile
+	if *rotate {
+		path, err := apiTokenFile(config, *service)
+		if err != nil {
+			return err
+		}
+		token, err := rotateAPIToken(path)
+		if err != nil {
+			return err
+		}
+		fmt.Println(token)
+		return nil
+	}
 	token, err := existingAPIToken(config, *service)
 	if err != nil {
 		return err
 	}
 	fmt.Println(token)
 	return nil
+}
+
+func apiTokenFile(config serveConfig, service bool) (string, error) {
+	if service {
+		if runtime.GOOS != "linux" {
+			return "", fmt.Errorf("--service is only available for Debian service installations")
+		}
+		config.APIToken = ""
+		if config.TokenFile == "" {
+			config.TokenFile = "/var/lib/mnc-station/api-token"
+		}
+	}
+	if config.APIToken != "" && config.TokenFile == "" {
+		return "", fmt.Errorf("cannot rotate MNC_STATION_TOKEN; configure a managed token file")
+	}
+	if config.APIToken != "" && config.TokenFile != "" {
+		return "", fmt.Errorf("set either MNC_STATION_TOKEN or --api-token-file, not both")
+	}
+	if config.TokenFile != "" {
+		return config.TokenFile, nil
+	}
+	return filepath.Join(config.DataDir, "api-token"), nil
 }
 
 func existingAPIToken(config serveConfig, service bool) (string, error) {
@@ -394,11 +429,10 @@ func loadOrCreateAPIToken(path string) (string, error) {
 		return "", fmt.Errorf("create API token directory: %w", err)
 	}
 
-	random := make([]byte, 24)
-	if _, err := rand.Read(random); err != nil {
-		return "", fmt.Errorf("generate API token: %w", err)
+	token, err := generateAPIToken()
+	if err != nil {
+		return "", err
 	}
-	token := hex.EncodeToString(random)
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if errors.Is(err, os.ErrExist) {
 		return loadAPIToken("", path)
@@ -416,6 +450,48 @@ func loadOrCreateAPIToken(path string) (string, error) {
 		return "", fmt.Errorf("close managed API token: %w", err)
 	}
 	return token, nil
+}
+
+func rotateAPIToken(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("inspect managed API token: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("managed API token path is not a regular file: %s", path)
+	}
+	token, err := generateAPIToken()
+	if err != nil {
+		return "", err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return "", fmt.Errorf("open managed API token for rotation: %w", err)
+	}
+	if err := file.Chmod(0600); err != nil {
+		_ = file.Close()
+		return "", fmt.Errorf("secure rotated API token: %w", err)
+	}
+	if _, err := fmt.Fprintln(file, token); err != nil {
+		_ = file.Close()
+		return "", fmt.Errorf("write rotated API token: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return "", fmt.Errorf("sync rotated API token: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return "", fmt.Errorf("close rotated API token: %w", err)
+	}
+	return token, nil
+}
+
+func generateAPIToken() (string, error) {
+	random := make([]byte, 24)
+	if _, err := rand.Read(random); err != nil {
+		return "", fmt.Errorf("generate API token: %w", err)
+	}
+	return hex.EncodeToString(random), nil
 }
 
 func isLoopbackListen(address string) bool {

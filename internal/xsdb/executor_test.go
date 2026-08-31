@@ -38,6 +38,29 @@ func TestValidateTargetID(t *testing.T) {
 	}
 }
 
+func TestValidateStableTargetIdentity(t *testing.T) {
+	for _, valid := range []string{"", "XFL1YADUCAY1A", "serial with spaces"} {
+		if err := ValidateTargetCableSerial(valid); err != nil {
+			t.Errorf("ValidateTargetCableSerial(%q) = %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"bad\nserial", strings.Repeat("x", 257)} {
+		if err := ValidateTargetCableSerial(invalid); err == nil {
+			t.Errorf("ValidateTargetCableSerial(%q) succeeded", invalid)
+		}
+	}
+	for _, valid := range []string{"", "0", "1", "42"} {
+		if err := ValidateTargetDeviceIndex(valid); err != nil {
+			t.Errorf("ValidateTargetDeviceIndex(%q) = %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"-1", "01", "1.0"} {
+		if err := ValidateTargetDeviceIndex(invalid); err == nil {
+			t.Errorf("ValidateTargetDeviceIndex(%q) succeeded", invalid)
+		}
+	}
+}
+
 func TestParseTargets(t *testing.T) {
 	output := "XSDB banner\n" + targetMarker +
 		"\t37\t505355\t30\t78637a75346576\t446967696c656e7420555342\t\n"
@@ -103,12 +126,14 @@ func TestRunPassesStationArgumentsAndCapturesOutput(t *testing.T) {
 	}
 	var lines []string
 	err := (Executor{Path: executable}).Run(context.Background(), Request{
-		Entrypoint:    entrypoint,
-		HWServerURL:   "tcp:127.0.0.1:3121",
-		TFTPServerIP:  "192.0.2.10",
-		BoardIP:       "192.0.2.20",
-		TargetID:      "17",
-		WorkingFolder: directory,
+		Entrypoint:        entrypoint,
+		HWServerURL:       "tcp:127.0.0.1:3121",
+		TFTPServerIP:      "192.0.2.10",
+		BoardIP:           "192.0.2.20",
+		TargetID:          "17",
+		TargetCableSerial: "SERIAL-A",
+		TargetDeviceIndex: "1",
+		WorkingFolder:     directory,
 	}, func(line string) { lines = append(lines, line) })
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +142,7 @@ func TestRunPassesStationArgumentsAndCapturesOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := entrypoint + " tcp:127.0.0.1:3121 192.0.2.10 192.0.2.20 17"
+	want := entrypoint + " tcp:127.0.0.1:3121 192.0.2.10 192.0.2.20 17 SERIAL-A 1"
 	if strings.TrimSpace(string(arguments)) != want {
 		t.Fatalf("arguments = %q, want %q", strings.TrimSpace(string(arguments)), want)
 	}

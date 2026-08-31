@@ -20,7 +20,10 @@ import (
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
 
-const targetSelectorMarker = "MNC_STATION_TARGET_SELECTOR_V1"
+const (
+	targetSelectorMarkerV1 = "MNC_STATION_TARGET_SELECTOR_V1"
+	targetSelectorMarkerV2 = "MNC_STATION_TARGET_SELECTOR_V2"
+)
 
 type XSDBExecutor interface {
 	Resolve() (string, error)
@@ -103,12 +106,14 @@ func (runner *Xilinx) Run(
 	go monitorTransfers(runContext, tftpServer.Events(), expected, allTransfersDone, eventsDone, emit)
 
 	xsdbErr := runner.config.Executor.Run(runContext, xsdb.Request{
-		Entrypoint:    entrypoint,
-		HWServerURL:   request.HWServerURL,
-		TFTPServerIP:  request.TFTPServerIP,
-		BoardIP:       request.BoardIP,
-		TargetID:      request.TargetID,
-		WorkingFolder: filepath.Dir(entrypoint),
+		Entrypoint:        entrypoint,
+		HWServerURL:       request.HWServerURL,
+		TFTPServerIP:      request.TFTPServerIP,
+		BoardIP:           request.BoardIP,
+		TargetID:          request.TargetID,
+		TargetCableSerial: request.TargetCableSerial,
+		TargetDeviceIndex: request.TargetDeviceIndex,
+		WorkingFolder:     filepath.Dir(entrypoint),
 	}, func(line string) {
 		if line != "" {
 			emit("info", "xsdb: "+line)
@@ -179,13 +184,26 @@ func (runner *Xilinx) Validate(stored artifact.StoredArtifact, request jobs.Requ
 	if err := xsdb.ValidateTargetID(request.TargetID); err != nil {
 		return err
 	}
-	if request.TargetID != "" {
+	if err := xsdb.ValidateTargetCableSerial(request.TargetCableSerial); err != nil {
+		return err
+	}
+	if err := xsdb.ValidateTargetDeviceIndex(request.TargetDeviceIndex); err != nil {
+		return err
+	}
+	if request.TargetDeviceIndex != "" && request.TargetCableSerial == "" {
+		return fmt.Errorf("targetDeviceIndex requires targetCableSerial")
+	}
+	if request.TargetID != "" || request.TargetCableSerial != "" {
 		entrypoint := filepath.Join(stored.RootPath, filepath.FromSlash(manifest.Executor.Entrypoint))
 		loader, err := os.ReadFile(entrypoint)
 		if err != nil {
 			return fmt.Errorf("read Xilinx JTAG loader: %w", err)
 		}
-		if !bytes.Contains(loader, []byte(targetSelectorMarker)) {
+		marker := targetSelectorMarkerV1
+		if request.TargetCableSerial != "" {
+			marker = targetSelectorMarkerV2
+		}
+		if !bytes.Contains(loader, []byte(marker)) {
 			return fmt.Errorf("artifact loader does not support selecting a JTAG device; rebuild the Station artifact")
 		}
 	}
