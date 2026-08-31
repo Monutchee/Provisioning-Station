@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -119,5 +120,44 @@ func TestExistingAPITokenDoesNotCreateMissingToken(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dataDirectory, "api-token")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing token was created: %v", err)
+	}
+}
+
+func TestRotateAPITokenReplacesAndSecuresManagedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "api-token")
+	old := "0123456789abcdef0123456789abcdef"
+	if err := os.WriteFile(path, []byte(old+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := rotateAPIToken(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rotated) != 48 || rotated == old {
+		t.Fatalf("rotated token has unexpected length or value")
+	}
+	loaded, err := loadAPIToken("", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded != rotated {
+		t.Fatal("rotated token file does not contain the returned token")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
+		t.Fatalf("rotated token mode=%#o", info.Mode().Perm())
+	}
+}
+
+func TestAPITokenFileRejectsEnvironmentTokenRotation(t *testing.T) {
+	_, err := apiTokenFile(serveConfig{
+		APIToken: "0123456789abcdef",
+		DataDir:  t.TempDir(),
+	}, false)
+	if err == nil || !strings.Contains(err.Error(), "cannot rotate") {
+		t.Fatalf("error=%v", err)
 	}
 }

@@ -394,7 +394,16 @@ components:
         targetId:
           type: string
           pattern: "^[1-9][0-9]*$"
-          description: XSDB PSU target selected by the target-discovery endpoint.
+          description: Session-local XSDB PSU target ID retained for compatibility and diagnostics.
+        targetCableSerial:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Stable JTAG cable serial selected by the target-discovery endpoint.
+        targetDeviceIndex:
+          type: string
+          pattern: "^(0|[1-9][0-9]*)$"
+          description: JTAG device index on the selected cable; requires targetCableSerial.
     Job:
       type: object
       required: [id, request, state, createdUtc, eventCount]

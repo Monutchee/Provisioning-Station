@@ -80,7 +80,7 @@ _mnc_station()
                     return
                     ;;
             esac
-            mapfile -t COMPREPLY < <(compgen -W '--service --data-dir --api-token-file --help -h' -- "${cur}")
+            mapfile -t COMPREPLY < <(compgen -W '--service --rotate --data-dir --api-token-file --help -h' -- "${cur}")
             ;;
         version|help|--version|--help|-version|-h)
             COMPREPLY=()

@@ -195,14 +195,17 @@ function renderTargets() {
   });
 }
 
-function selectedTargetIDs() {
-  return Array.from(elements["target-list"].querySelectorAll('input[type="checkbox"]:checked'), (input) => input.value);
+function selectedTargets() {
+  const selectedIDs = new Set(
+    Array.from(elements["target-list"].querySelectorAll('input[type="checkbox"]:checked'), (input) => input.value),
+  );
+  return state.targets.filter((target) => selectedIDs.has(target.id));
 }
 
 function updateStartButton() {
   const artifactSelected = state.artifacts.some((item) => item.id === state.selectedArtifact);
   elements["start-button"].disabled = !artifactSelected || !state.capabilities?.xsdb?.available ||
-    state.targetLoading || selectedTargetIDs().length === 0;
+    state.targetLoading || selectedTargets().length === 0;
 }
 
 async function uploadArtifact(file) {
@@ -293,13 +296,13 @@ async function createJob(event) {
     hwServerUrl: elements["hw-server-url"].value.trim(),
     tftpServerIp: elements["tftp-server-ip"].value.trim(),
   };
-  const targetIDs = selectedTargetIDs();
-  if (!targetIDs.length) {
+  const targets = selectedTargets();
+  if (!targets.length) {
     showFormError("Scan and select at least one JTAG device.");
     return;
   }
   const boardIP = elements["board-ip"].value.trim();
-  if (targetIDs.length > 1 && boardIP) {
+  if (targets.length > 1 && boardIP) {
     showFormError("Leave Board IPv4 empty when booting multiple devices so each board can obtain a unique DHCP address.");
     return;
   }
@@ -307,9 +310,14 @@ async function createJob(event) {
   elements["start-button"].disabled = true;
   const created = [];
   try {
-    for (const targetID of targetIDs) {
+    for (const target of targets) {
+      const targetRequest = { ...baseRequest, targetId: target.id };
+      if (target.cableSerial) targetRequest.targetCableSerial = target.cableSerial;
+      if (target.deviceIndex !== undefined && target.deviceIndex !== "") {
+        targetRequest.targetDeviceIndex = target.deviceIndex;
+      }
       const job = await api("/api/v1/jobs", {
-        method: "POST", body: JSON.stringify({ ...baseRequest, targetId: targetID }),
+        method: "POST", body: JSON.stringify(targetRequest),
       });
       created.push(job);
     }

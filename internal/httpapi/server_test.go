@@ -211,7 +211,8 @@ func TestArtifactUploadCreatesRunnableJobAndEvents(t *testing.T) {
 	}
 
 	jobJSON, err := json.Marshal(jobs.Request{
-		ArtifactID: stored.ID, HWServerURL: "tcp:127.0.0.1:3121", TFTPServerIP: "192.0.2.10", TargetID: "3",
+		ArtifactID: stored.ID, HWServerURL: "tcp:127.0.0.1:3121", TFTPServerIP: "192.0.2.10",
+		TargetID: "3", TargetCableSerial: "210308A12345", TargetDeviceIndex: "0",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -226,8 +227,9 @@ func TestArtifactUploadCreatesRunnableJobAndEvents(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &job); err != nil {
 		t.Fatal(err)
 	}
-	if job.Request.TargetID != "3" {
-		t.Fatalf("job target = %q, want 3", job.Request.TargetID)
+	if job.Request.TargetID != "3" || job.Request.TargetCableSerial != "210308A12345" ||
+		job.Request.TargetDeviceIndex != "0" {
+		t.Fatalf("job target = %+v", job.Request)
 	}
 
 	deadline := time.Now().Add(time.Second)

@@ -125,6 +125,15 @@ configured token, the agent creates
 a private `api-token` file in its data directory. The Debian service stores it
 at `/var/lib/mnc-station/api-token`; display it with
 `sudo mnc-station token --service` and enter it when the dashboard asks.
+Rotate a managed Debian service token after accidental disclosure with:
+
+```bash
+sudo mnc-station token --rotate --service
+sudo systemctl restart mnc-station
+```
+
+The first command prints the new token. Update every client and preset before
+restarting; the running service keeps the old token in memory until restart.
 Put TLS or a mutually authenticated reverse proxy in front of the agent before
 exposing it beyond a trusted station network.
 
@@ -135,8 +144,11 @@ The API is rooted at `/api/v1`. Its OpenAPI description is
 
 1. `POST /api/v1/artifacts` with one multipart `artifact` file.
 2. `GET /api/v1/xilinx/targets?hwServerUrl=...` to discover PSU targets.
-3. `POST /api/v1/jobs` with the artifact ID, connection settings, and selected
-   `targetId`. Submit one job per target for a multi-board boot.
+3. `POST /api/v1/jobs` with the artifact ID, connection settings,
+   `targetCableSerial`, `targetDeviceIndex`, and the diagnostic `targetId`.
+   Submit one job per target for a multi-board boot. The stable cable identity
+   is resolved inside the boot XSDB process because numeric IDs are
+   session-local.
 4. Poll `GET /api/v1/jobs/{id}` and `GET /api/v1/jobs/{id}/events`, or request
    `text/event-stream` for events.
 5. `POST /api/v1/jobs/{id}/cancel` when cancellation is needed.
