@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Local Monutchee Provisioning Station">
+  <title>Monutchee Provisioning Station</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">M</span>
+      <div>
+        <p class="eyebrow">Monutchee</p>
+        <h1>Provisioning Station</h1>
+      </div>
+    </div>
+    <div class="agent-state" id="agent-state" aria-live="polite">
+      <span class="state-dot"></span>
+      <span>Connecting</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Local hardware workflow</p>
+        <h2>Boot a target over JTAG</h2>
+        <p>Import a verified Station artifact, choose the Xilinx connection, and follow every XSDB and TFTP event in one place.</p>
+      </div>
+      <dl class="capability-strip">
+        <div>
+          <dt>Agent</dt>
+          <dd id="agent-version">—</dd>
+        </div>
+        <div>
+          <dt>XSDB</dt>
+          <dd id="xsdb-state">Checking</dd>
+        </div>
+        <div>
+          <dt>TFTP listener</dt>
+          <dd id="tftp-listen">—</dd>
+        </div>
+      </dl>
+    </section>
+
+    <div class="notice hidden" id="auth-notice">
+      <div>
+        <strong>Authentication required</strong>
+        <span>This Station agent requires its API token.</span>
+      </div>
+      <form id="token-form" class="token-form">
+        <label class="sr-only" for="api-token">API token</label>
+        <input id="api-token" type="password" autocomplete="off" placeholder="Bearer token" required>
+        <button type="submit" class="button secondary">Connect</button>
+      </form>
+    </div>
+
+    <div class="layout">
+      <section class="panel setup-panel" aria-labelledby="setup-title">
+        <div class="panel-heading">
+          <div>
+            <p class="step">01</p>
+            <h2 id="setup-title">Prepare boot</h2>
+          </div>
+          <span class="badge" id="artifact-count">0 artifacts</span>
+        </div>
+
+        <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-controls="artifact-file">
+          <input id="artifact-file" type="file" accept=".gz,.tgz,application/gzip" class="sr-only">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5h14v-5"/></svg>
+          <strong>Drop a Station artifact here</strong>
+          <span>or select an <code>*.tar.gz</code> file</span>
+          <div class="upload-progress hidden" id="upload-progress"><span></span></div>
+        </div>
+
+        <label class="field">
+          <span>Artifact</span>
+          <select id="artifact-select">
+            <option value="">Import an artifact first</option>
+          </select>
+        </label>
+
+        <article class="artifact-card hidden" id="artifact-card">
+          <div>
+            <span class="vendor" id="artifact-vendor">—</span>
+            <h3 id="artifact-name">—</h3>
+            <p id="artifact-details">—</p>
+            <dl class="artifact-metadata">
+              <div>
+                <dt>Artifact SHA-256</dt>
+                <dd id="artifact-sha">—</dd>
+              </div>
+              <div>
+                <dt>Built</dt>
+                <dd id="artifact-built">—</dd>
+              </div>
+            </dl>
+          </div>
+          <div class="verified"><span>✓</span> Verified</div>
+        </article>
+
+        <form id="boot-form">
+          <div class="field-grid">
+            <label class="field wide">
+              <span>Hardware server URL</span>
+              <input id="hw-server-url" name="hwServerUrl" value="tcp:127.0.0.1:3121" spellcheck="false" required>
+              <small>Local or remote Xilinx <code>hw_server</code></small>
+            </label>
+            <div class="field wide target-picker">
+              <div class="target-picker-heading">
+                <div>
+                  <span>JTAG devices</span>
+                  <small>Select one or more boards to boot with this artifact</small>
+                </div>
+                <button id="discover-targets" type="button" class="button scan-button">Scan devices</button>
+              </div>
+              <div id="target-list" class="target-list" aria-live="polite">
+                <p>Scan the hardware server to select a device.</p>
+              </div>
+            </div>
+            <label class="field">
+              <span>TFTP server IPv4</span>
+              <input id="tftp-server-ip" name="tftpServerIp" placeholder="192.168.1.10" inputmode="decimal" spellcheck="false" list="tftp-server-ip-options" required>
+              <datalist id="tftp-server-ip-options"></datalist>
+              <small>Detected Station IP; edit for another interface</small>
+            </label>
+            <label class="field">
+              <span>Board IPv4 <em>optional</em></span>
+              <input id="board-ip" name="boardIp" placeholder="192.168.1.20" inputmode="decimal" spellcheck="false">
+              <small>Overrides the artifact default</small>
+            </label>
+          </div>
+          <div class="form-error hidden" id="form-error" role="alert"></div>
+          <button id="start-button" type="submit" class="button primary" disabled>
+            <span>Start JTAG boot</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </form>
+      </section>
+
+      <section class="panel activity-panel" aria-labelledby="activity-title">
+        <div class="panel-heading">
+          <div>
+            <p class="step">02</p>
+            <h2 id="activity-title">Station activity</h2>
+          </div>
+          <button type="button" class="icon-button" id="refresh-jobs" title="Refresh jobs" aria-label="Refresh jobs">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg>
+          </button>
+        </div>
+
+        <div class="empty-state" id="empty-jobs">
+          <span class="pulse-ring"></span>
+          <h3>No provisioning jobs yet</h3>
+          <p>Your JTAG boot history and live output will appear here.</p>
+        </div>
+
+        <div class="job-workspace hidden" id="job-workspace">
+          <label class="field compact">
+            <span>Job history</span>
+            <select id="job-select"></select>
+          </label>
+          <article class="job-summary">
+            <div>
+              <span class="job-state" id="job-state">queued</span>
+              <h3 id="job-title">JTAG boot</h3>
+              <p id="job-meta">—</p>
+            </div>
+            <button type="button" id="cancel-button" class="button danger hidden">Cancel</button>
+          </article>
+          <div class="timeline" id="timeline" aria-live="polite"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div class="toast hidden" id="toast" role="status"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+# Optional Provisioning Station environment.
+# The service automatically searches /opt/Xilinx after checking PATH.
+# Set this only for a nonstandard install or explicit version selection.
+# MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
+
+# The packaged service listens on every IPv4 interface by default. Override it
+# with the following setting when the dashboard must be local-only.
+# MNC_STATION_HTTP_LISTEN=127.0.0.1:8042
+
+# A non-loopback listener automatically creates
+# /var/lib/mnc-station/api-token. Set this to use a managed token instead.
+# MNC_STATION_TOKEN_FILE=/etc/mnc-station/token
