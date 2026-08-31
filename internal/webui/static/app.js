@@ -9,6 +9,7 @@ const state = {
   artifacts: [],
   targets: [],
   targetLoading: false,
+  uploadingArtifact: false,
   jobs: [],
   selectedArtifact: "",
   selectedJob: "",
@@ -209,8 +210,12 @@ function updateStartButton() {
 }
 
 async function uploadArtifact(file) {
-  if (!file) return;
+  if (!file || state.uploadingArtifact) return;
+  state.uploadingArtifact = true;
+  showFormError("");
   elements["upload-progress"].classList.remove("hidden");
+  elements["artifact-file"].disabled = true;
+  elements["drop-zone"].setAttribute("aria-busy", "true");
   const form = new FormData();
   form.append("artifact", file, file.name);
   try {
@@ -219,11 +224,21 @@ async function uploadArtifact(file) {
     await loadArtifacts();
     showToast(`${imported.manifest.artifact.name} verified and imported`);
   } catch (error) {
-    showFormError(error.message);
+    showFormError(artifactUploadError(error, file));
   } finally {
+    state.uploadingArtifact = false;
     elements["upload-progress"].classList.add("hidden");
+    elements["artifact-file"].disabled = false;
     elements["artifact-file"].value = "";
+    elements["drop-zone"].removeAttribute("aria-busy");
   }
+}
+
+function artifactUploadError(error, file) {
+  if (error.message.includes("unexpected EOF") || error.message.includes("ended early")) {
+    return `${file.name} ended early during verification. Wait for the artifact export to finish, then select the file again.`;
+  }
+  return error.message;
 }
 
 async function loadJobs(selectNewest = false) {

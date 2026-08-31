@@ -107,6 +107,7 @@ main { max-width: 1440px; margin: 0 auto; padding: 48px 24px 72px; }
   background: var(--surface-soft); text-align: center; outline: none; transition: .18s ease;
 }
 .drop-zone:hover, .drop-zone:focus-visible, .drop-zone.dragging { border-color: var(--green-bright); background: var(--green-soft); transform: translateY(-1px); }
+.drop-zone[aria-busy="true"] { pointer-events: none; cursor: wait; opacity: .72; transform: none; }
 .drop-zone svg { width: 28px; height: 28px; margin-bottom: 10px; fill: none; stroke: var(--green); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .drop-zone strong { font-size: 14px; }
 .drop-zone > span { margin-top: 5px; color: var(--muted); font-size: 12px; }
