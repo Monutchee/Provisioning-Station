@@ -7,6 +7,8 @@ const state = {
   token: sessionStorage.getItem("mnc-station-token") || "",
   capabilities: null,
   artifacts: [],
+  targets: [],
+  targetLoading: false,
   jobs: [],
   selectedArtifact: "",
   selectedJob: "",
@@ -19,7 +21,8 @@ const elements = Object.fromEntries([
   "agent-state", "agent-version", "xsdb-state", "tftp-listen", "auth-notice",
   "token-form", "api-token", "drop-zone", "artifact-file", "upload-progress",
   "artifact-select", "artifact-count", "artifact-card", "artifact-vendor",
-  "artifact-name", "artifact-details", "boot-form", "hw-server-url",
+  "artifact-name", "artifact-details", "artifact-sha", "artifact-built",
+  "boot-form", "hw-server-url", "discover-targets", "target-list",
   "tftp-server-ip", "tftp-server-ip-options", "board-ip", "form-error", "start-button", "refresh-jobs",
   "empty-jobs", "job-workspace", "job-select", "job-state", "job-title",
   "job-meta", "cancel-button", "timeline", "toast",
@@ -113,12 +116,94 @@ function renderArtifacts() {
   elements["artifact-count"].textContent = `${state.artifacts.length} artifact${state.artifacts.length === 1 ? "" : "s"}`;
   const selected = state.artifacts.find((item) => item.id === state.selectedArtifact);
   elements["artifact-card"].classList.toggle("hidden", !selected);
-  elements["start-button"].disabled = !selected || !state.capabilities?.xsdb?.available;
+  updateStartButton();
   if (!selected) return;
   const meta = selected.manifest.artifact;
   elements["artifact-vendor"].textContent = `${meta.vendor} · ${meta.operation}`;
   elements["artifact-name"].textContent = meta.name;
   elements["artifact-details"].textContent = `${meta.product} / ${meta.machine} · ${meta.version} · ${formatBytes(selected.compressedBytes)}`;
+  elements["artifact-sha"].textContent = selected.id;
+  elements["artifact-sha"].title = selected.id;
+  elements["artifact-built"].textContent = formatTime(meta.createdUtc);
+}
+
+async function discoverTargets() {
+  showFormError("");
+  const hardwareServerURL = elements["hw-server-url"].value.trim();
+  if (!hardwareServerURL) {
+    showFormError("Enter a hardware server URL before scanning devices.");
+    return;
+  }
+  state.targetLoading = true;
+  state.targets = [];
+  renderTargets();
+  elements["discover-targets"].disabled = true;
+  elements["discover-targets"].textContent = "Scanning…";
+  updateStartButton();
+  try {
+    const query = new URLSearchParams({ hwServerUrl: hardwareServerURL });
+    const payload = await api(`/api/v1/xilinx/targets?${query}`);
+    state.targets = payload.targets || [];
+    renderTargets();
+    if (!state.targets.length) showFormError("No ZynqMP PSU targets were found on this hardware server.");
+  } catch (error) {
+    renderTargets();
+    showFormError(error.message);
+  } finally {
+    state.targetLoading = false;
+    elements["discover-targets"].disabled = false;
+    elements["discover-targets"].textContent = "Scan devices";
+    updateStartButton();
+  }
+}
+
+function renderTargets() {
+  const list = elements["target-list"];
+  list.replaceChildren();
+  if (state.targetLoading) {
+    const message = document.createElement("p");
+    message.textContent = "Connecting to hw_server and scanning JTAG devices…";
+    list.append(message);
+    return;
+  }
+  if (!state.targets.length) {
+    const message = document.createElement("p");
+    message.textContent = "Scan the hardware server to select a device.";
+    list.append(message);
+    return;
+  }
+  state.targets.forEach((target, index) => {
+    const option = document.createElement("label");
+    option.className = "target-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = target.id;
+    checkbox.checked = index === 0;
+    checkbox.addEventListener("change", updateStartButton);
+    const description = document.createElement("span");
+    const name = document.createElement("strong");
+    name.textContent = target.cableName || target.cableSerial || `JTAG target ${target.id}`;
+    const details = document.createElement("small");
+    const properties = [];
+    if (target.cableSerial) properties.push(`serial ${target.cableSerial}`);
+    if (target.deviceName) properties.push(target.deviceName);
+    if (target.deviceIndex !== undefined && target.deviceIndex !== "") properties.push(`device ${target.deviceIndex}`);
+    properties.push(`XSDB target ${target.id}`);
+    details.textContent = properties.join(" · ");
+    description.append(name, details);
+    option.append(checkbox, description);
+    list.append(option);
+  });
+}
+
+function selectedTargetIDs() {
+  return Array.from(elements["target-list"].querySelectorAll('input[type="checkbox"]:checked'), (input) => input.value);
+}
+
+function updateStartButton() {
+  const artifactSelected = state.artifacts.some((item) => item.id === state.selectedArtifact);
+  elements["start-button"].disabled = !artifactSelected || !state.capabilities?.xsdb?.available ||
+    state.targetLoading || selectedTargetIDs().length === 0;
 }
 
 async function uploadArtifact(file) {
@@ -167,7 +252,8 @@ function renderJobs() {
   elements["job-state"].textContent = job.state;
   elements["job-state"].className = `job-state ${job.state}`;
   elements["job-title"].textContent = artifact?.manifest?.artifact?.name || "JTAG boot";
-  elements["job-meta"].textContent = `${job.request.hwServerUrl} · ${formatTime(job.createdUtc)}`;
+  const target = job.request.targetId ? ` · target ${job.request.targetId}` : "";
+  elements["job-meta"].textContent = `${job.request.hwServerUrl}${target} · ${formatTime(job.createdUtc)}`;
   elements["cancel-button"].classList.toggle("hidden", ["succeeded", "failed", "canceled"].includes(job.state));
   scheduleJobRefresh(job);
 }
@@ -203,23 +289,39 @@ function renderEvent(event) {
 async function createJob(event) {
   event.preventDefault();
   showFormError("");
-  const request = {
+  const baseRequest = {
     artifactId: state.selectedArtifact,
     hwServerUrl: elements["hw-server-url"].value.trim(),
     tftpServerIp: elements["tftp-server-ip"].value.trim(),
   };
+  const targetIDs = selectedTargetIDs();
+  if (!targetIDs.length) {
+    showFormError("Scan and select at least one JTAG device.");
+    return;
+  }
   const boardIP = elements["board-ip"].value.trim();
-  if (boardIP) request.boardIp = boardIP;
+  if (targetIDs.length > 1 && boardIP) {
+    showFormError("Leave Board IPv4 empty when booting multiple devices so each board can obtain a unique DHCP address.");
+    return;
+  }
+  if (boardIP) baseRequest.boardIp = boardIP;
   elements["start-button"].disabled = true;
+  const created = [];
   try {
-    const job = await api("/api/v1/jobs", { method: "POST", body: JSON.stringify(request) });
-    state.selectedJob = job.id;
+    for (const targetID of targetIDs) {
+      const job = await api("/api/v1/jobs", {
+        method: "POST", body: JSON.stringify({ ...baseRequest, targetId: targetID }),
+      });
+      created.push(job);
+    }
+    state.selectedJob = created[created.length - 1].id;
     await loadJobs(true);
-    showToast("JTAG boot job queued");
+    showToast(`${created.length} JTAG boot job${created.length === 1 ? "" : "s"} queued`);
   } catch (error) {
-    showFormError(error.message);
+    const prefix = created.length ? `${created.length} job${created.length === 1 ? "" : "s"} queued; ` : "";
+    showFormError(prefix + error.message);
   } finally {
-    renderArtifacts();
+    updateStartButton();
   }
 }
 
@@ -281,6 +383,12 @@ for (const name of ["dragleave", "drop"]) {
 elements["drop-zone"].addEventListener("drop", (event) => uploadArtifact(event.dataTransfer.files[0]));
 elements["artifact-select"].addEventListener("change", (event) => { state.selectedArtifact = event.target.value; renderArtifacts(); });
 elements["boot-form"].addEventListener("submit", createJob);
+elements["discover-targets"].addEventListener("click", discoverTargets);
+elements["hw-server-url"].addEventListener("input", () => {
+  state.targets = [];
+  renderTargets();
+  updateStartButton();
+});
 elements["refresh-jobs"].addEventListener("click", () => loadJobs().catch((error) => showToast(error.message)));
 elements["job-select"].addEventListener("change", (event) => { state.selectedJob = event.target.value; renderJobs(); loadEvents(); });
 elements["cancel-button"].addEventListener("click", cancelJob);

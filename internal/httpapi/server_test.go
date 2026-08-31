@@ -21,14 +21,20 @@ import (
 
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
 	"github.com/Monutchee/Provisioning-Station/internal/jobs"
+	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
 
 type testResolver struct {
-	path string
-	err  error
+	path        string
+	err         error
+	targets     []xsdb.Target
+	discoverErr error
 }
 
 func (resolver testResolver) Resolve() (string, error) { return resolver.path, resolver.err }
+func (resolver testResolver) Discover(context.Context, string) ([]xsdb.Target, error) {
+	return resolver.targets, resolver.discoverErr
+}
 
 type immediateRunner struct{}
 
@@ -57,7 +63,10 @@ func newTestServices(t *testing.T, token string) testServices {
 	t.Cleanup(manager.Close)
 	server, err := New(Config{
 		Version: "test-version", APIToken: token, TFTPListen: ":69",
-		XSDB: testResolver{path: "/opt/Xilinx/bin/xsdb"},
+		XSDB: testResolver{path: "/opt/Xilinx/bin/xsdb", targets: []xsdb.Target{{
+			ID: "3", Name: "PSU", DeviceIndex: "0", DeviceName: "xczu4ev",
+			CableName: "Digilent USB Device", CableSerial: "210308A12345",
+		}}},
 	}, store, manager)
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +105,44 @@ func TestProtectedAPIRequiresExactBearerToken(t *testing.T) {
 	services.handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"version":"test-version"`) {
 		t.Fatalf("authorized capabilities: status=%d body=%s", response.Code, response.Body)
+	}
+}
+
+func TestLoopbackClientDoesNotRequireBearerToken(t *testing.T) {
+	services := newTestServices(t, "secret")
+	for _, remoteAddress := range []string{"127.0.0.1:12345", "[::1]:12345"} {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/capabilities", nil)
+		request.RemoteAddr = remoteAddress
+		if strings.HasPrefix(remoteAddress, "[") {
+			request.Host = "[::1]:8042"
+		} else {
+			request.Host = "127.0.0.1:8042"
+		}
+		response := httptest.NewRecorder()
+		services.handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"authRequired":false`) {
+			t.Fatalf("remote %s: status=%d body=%s", remoteAddress, response.Code, response.Body)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/capabilities", nil)
+	request.RemoteAddr = "172.0.0.1:12345"
+	request.Host = "172.0.0.1:8042"
+	response := httptest.NewRecorder()
+	services.handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("non-loopback status=%d body=%s", response.Code, response.Body)
+	}
+}
+
+func TestDiscoverXilinxTargets(t *testing.T) {
+	services := newTestServices(t, "")
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/xilinx/targets?hwServerUrl=tcp%3A127.0.0.1%3A3121", nil)
+	response := httptest.NewRecorder()
+	services.handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK ||
+		!strings.Contains(response.Body.String(), `"cableSerial":"210308A12345"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
 }
 
@@ -164,7 +211,7 @@ func TestArtifactUploadCreatesRunnableJobAndEvents(t *testing.T) {
 	}
 
 	jobJSON, err := json.Marshal(jobs.Request{
-		ArtifactID: stored.ID, HWServerURL: "tcp:127.0.0.1:3121", TFTPServerIP: "192.0.2.10",
+		ArtifactID: stored.ID, HWServerURL: "tcp:127.0.0.1:3121", TFTPServerIP: "192.0.2.10", TargetID: "3",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -178,6 +225,9 @@ func TestArtifactUploadCreatesRunnableJobAndEvents(t *testing.T) {
 	var job jobs.Job
 	if err := json.Unmarshal(response.Body.Bytes(), &job); err != nil {
 		t.Fatal(err)
+	}
+	if job.Request.TargetID != "3" {
+		t.Fatalf("job target = %q, want 3", job.Request.TargetID)
 	}
 
 	deadline := time.Now().Add(time.Second)

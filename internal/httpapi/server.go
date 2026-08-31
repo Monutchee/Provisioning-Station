@@ -5,10 +5,12 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,12 +19,14 @@ import (
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
 	"github.com/Monutchee/Provisioning-Station/internal/jobs"
 	"github.com/Monutchee/Provisioning-Station/internal/webui"
+	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
 
 const APIVersion = "v1"
 
 type Resolver interface {
 	Resolve() (string, error)
+	Discover(context.Context, string) ([]xsdb.Target, error)
 }
 
 type Config struct {
@@ -57,6 +61,7 @@ func New(config Config, artifacts *artifact.Store, jobManager *jobs.Manager) (*S
 	mux.Handle("GET /api/v1/artifacts", server.authorize(http.HandlerFunc(server.listArtifacts)))
 	mux.Handle("POST /api/v1/artifacts", server.authorize(http.HandlerFunc(server.importArtifact)))
 	mux.Handle("GET /api/v1/artifacts/{id}", server.authorize(http.HandlerFunc(server.getArtifact)))
+	mux.Handle("GET /api/v1/xilinx/targets", server.authorize(http.HandlerFunc(server.xilinxTargets)))
 	mux.Handle("GET /api/v1/jobs", server.authorize(http.HandlerFunc(server.listJobs)))
 	mux.Handle("POST /api/v1/jobs", server.authorize(http.HandlerFunc(server.createJob)))
 	mux.Handle("GET /api/v1/jobs/{id}", server.authorize(http.HandlerFunc(server.getJob)))
@@ -80,7 +85,7 @@ func (server *Server) health(response http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (server *Server) capabilities(response http.ResponseWriter, _ *http.Request) {
+func (server *Server) capabilities(response http.ResponseWriter, request *http.Request) {
 	xsdbPath, xsdbErr := server.config.XSDB.Resolve()
 	xsdbStatus := map[string]any{"available": xsdbErr == nil}
 	if xsdbErr == nil {
@@ -115,8 +120,20 @@ func (server *Server) capabilities(response http.ResponseWriter, _ *http.Request
 		"tftpListen":   server.config.TFTPListen,
 		"network":      networkStatus,
 		"xsdb":         xsdbStatus,
-		"authRequired": server.config.APIToken != "",
+		"authRequired": server.config.APIToken != "" && !isDirectLoopbackRequest(request),
 	})
+}
+
+func (server *Server) xilinxTargets(response http.ResponseWriter, request *http.Request) {
+	hardwareServerURL := request.URL.Query().Get("hwServerUrl")
+	ctx, cancel := context.WithTimeout(request.Context(), 15*time.Second)
+	defer cancel()
+	targets, err := server.config.XSDB.Discover(ctx, hardwareServerURL)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "target_discovery_failed", err.Error())
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"targets": targets})
 }
 
 func (server *Server) listArtifacts(response http.ResponseWriter, _ *http.Request) {
@@ -297,6 +314,10 @@ func (server *Server) authorize(next http.Handler) http.Handler {
 	}
 	expected := []byte(server.config.APIToken)
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if isDirectLoopbackRequest(request) {
+			next.ServeHTTP(response, request)
+			return
+		}
 		value := request.Header.Get("Authorization")
 		provided := []byte(strings.TrimPrefix(value, "Bearer "))
 		if !strings.HasPrefix(value, "Bearer ") || len(provided) != len(expected) || subtle.ConstantTimeCompare(provided, expected) != 1 {
@@ -306,6 +327,24 @@ func (server *Server) authorize(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(response, request)
 	})
+}
+
+func isDirectLoopbackRequest(request *http.Request) bool {
+	remoteHost, _, err := net.SplitHostPort(request.RemoteAddr)
+	if err != nil {
+		remoteHost = request.RemoteAddr
+	}
+	remoteIP := net.ParseIP(strings.Trim(remoteHost, "[]"))
+	if remoteIP == nil || !remoteIP.IsLoopback() {
+		return false
+	}
+
+	requestHost, _, err := net.SplitHostPort(request.Host)
+	if err != nil {
+		requestHost = request.Host
+	}
+	requestIP := net.ParseIP(strings.Trim(requestHost, "[]"))
+	return requestIP != nil && requestIP.IsLoopback()
 }
 
 func decodeJSON(request *http.Request, destination any) error {

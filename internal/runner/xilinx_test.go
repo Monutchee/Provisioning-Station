@@ -50,13 +50,47 @@ func TestNewXilinxDefaults(t *testing.T) {
 	}
 }
 
+func TestXilinxRejectsOldLoaderForTargetedJob(t *testing.T) {
+	root := t.TempDir()
+	entrypoint := filepath.Join(root, "jtag", "load-jtag-image.tcl")
+	if err := os.MkdirAll(filepath.Dir(entrypoint), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entrypoint, []byte("puts old-loader\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hardwareRunner, err := NewXilinx(XilinxConfig{Executor: fakeXSDB{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = hardwareRunner.Validate(artifact.StoredArtifact{
+		RootPath: root,
+		Manifest: artifact.Manifest{
+			Artifact: artifact.ArtifactMetadata{Vendor: "xilinx", Operation: "jtag-boot"},
+			Executor: artifact.ExecutorMetadata{
+				Type: "xilinx-xsdb", Entrypoint: "jtag/load-jtag-image.tcl", TFTPRoot: "tftp",
+			},
+			Files: map[string]artifact.FileDescriptor{"tftp/Image": {}},
+		},
+	}, jobs.Request{
+		HWServerURL: "tcp:127.0.0.1:3121", TFTPServerIP: "192.0.2.10", TargetID: "3",
+	})
+	if err == nil || !strings.Contains(err.Error(), "rebuild the Station artifact") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 type downloadingXSDB struct {
-	address string
-	files   []string
+	address  string
+	files    []string
+	requests chan xsdb.Request
 }
 
 func (downloadingXSDB) Resolve() (string, error) { return "xsdb", nil }
-func (executor downloadingXSDB) Run(ctx context.Context, _ xsdb.Request, emit xsdb.LogFunc) error {
+func (executor downloadingXSDB) Run(ctx context.Context, request xsdb.Request, emit xsdb.LogFunc) error {
+	if executor.requests != nil {
+		executor.requests <- request
+	}
 	for _, filename := range executor.files {
 		if emit != nil {
 			emit("requesting " + filename)
@@ -80,7 +114,7 @@ func TestXilinxRunnerCompletesAfterEveryTFTPFile(t *testing.T) {
 
 	root := t.TempDir()
 	for name, content := range map[string]string{
-		"jtag/load-jtag-image.tcl": "puts ok\n",
+		"jtag/load-jtag-image.tcl": "# MNC_STATION_TARGET_SELECTOR_V1\nputs ok\n",
 		"tftp/Image":               "kernel",
 		"tftp/boot.scr":            "script",
 	} {
@@ -101,8 +135,9 @@ func TestXilinxRunnerCompletesAfterEveryTFTPFile(t *testing.T) {
 			"jtag/load-jtag-image.tcl": {}, "tftp/Image": {}, "tftp/boot.scr": {},
 		},
 	}
+	requests := make(chan xsdb.Request, 1)
 	hardwareRunner, err := NewXilinx(XilinxConfig{
-		Executor:   downloadingXSDB{address: address, files: []string{"Image", "boot.scr"}},
+		Executor:   downloadingXSDB{address: address, files: []string{"Image", "boot.scr"}, requests: requests},
 		TFTPListen: address, TFTPTimeout: 100 * time.Millisecond, JobTimeout: 2 * time.Second,
 	})
 	if err != nil {
@@ -113,7 +148,7 @@ func TestXilinxRunnerCompletesAfterEveryTFTPFile(t *testing.T) {
 	err = hardwareRunner.Run(context.Background(), artifact.StoredArtifact{
 		Manifest: manifest, RootPath: root,
 	}, jobs.Request{
-		HWServerURL: "tcp:127.0.0.1:3121", TFTPServerIP: "127.0.0.1",
+		HWServerURL: "tcp:127.0.0.1:3121", TFTPServerIP: "127.0.0.1", TargetID: "7",
 	}, func(_ string, message string) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
@@ -121,6 +156,9 @@ func TestXilinxRunnerCompletesAfterEveryTFTPFile(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if request := <-requests; request.TargetID != "7" {
+		t.Fatalf("XSDB request target = %q, want 7", request.TargetID)
 	}
 	logMutex.Lock()
 	joined := strings.Join(logs, "\n")

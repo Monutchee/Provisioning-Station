@@ -136,6 +136,11 @@ input:focus, select:focus { border-color: var(--green-bright); box-shadow: 0 0 0
 }
 .artifact-card h3 { margin: 3px 0; font-size: 15px; }
 .artifact-card p { margin: 0; color: var(--muted); font-size: 11px; }
+.artifact-card > div:first-child { min-width: 0; }
+.artifact-metadata { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px 18px; margin: 12px 0 0; }
+.artifact-metadata div { min-width: 0; }
+.artifact-metadata dt { color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.artifact-metadata dd { margin: 3px 0 0; font: 10px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
 .vendor { color: var(--green); font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .verified { display: flex; gap: 5px; align-items: center; color: var(--green); font-size: 11px; font-weight: 750; white-space: nowrap; }
 .verified span { width: 19px; height: 19px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--green); }
@@ -151,7 +156,20 @@ input:focus, select:focus { border-color: var(--green-bright); box-shadow: 0 0 0
 .button.primary svg { width: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
 .button.secondary { color: white; background: #74520e; }
 .button.danger { color: var(--red); background: #faeceb; }
+.scan-button { min-height: 35px; color: var(--green); border: 1px solid var(--line); background: var(--surface); white-space: nowrap; }
 .form-error { margin-top: 15px; padding: 10px 12px; border-radius: 9px; color: var(--red); background: #fff0ef; font-size: 12px; }
+
+.target-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.target-picker-heading > div { display: flex; flex-direction: column; gap: 4px; }
+.target-picker-heading span { font-size: 12px; font-weight: 720; }
+.target-list { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.target-list > p { margin: 3px; color: var(--muted); font-size: 11px; }
+.target-option { display: flex; align-items: center; gap: 10px; padding: 9px; border-radius: 8px; cursor: pointer; }
+.target-option:hover { background: var(--surface-soft); }
+.target-option input { flex: 0 0 auto; width: 17px; min-height: 17px; padding: 0; accent-color: var(--green); }
+.target-option span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.target-option strong { font-size: 11px; }
+.target-option small { overflow-wrap: anywhere; }
 
 .icon-button { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 10px; display: grid; place-items: center; color: var(--muted); background: var(--surface); }
 .icon-button svg { width: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -201,6 +219,7 @@ input:focus, select:focus { border-color: var(--green-bright); box-shadow: 0 0 0
   .setup-panel, .activity-panel > .panel-heading { padding: 21px; }
   .field-grid { grid-template-columns: 1fr; }
   .field-grid .wide { grid-column: auto; }
+  .artifact-metadata { grid-template-columns: 1fr; }
   .notice { align-items: stretch; flex-direction: column; }
   .token-form { flex-direction: column; }
   .token-form input { min-width: 0; }

@@ -2,7 +2,10 @@ openapi: 3.1.0
 info:
   title: Monutchee Provisioning Station API
   version: 1.0.0
-  description: Local hardware provisioning API. Cloud orchestration is outside this service.
+  description: >-
+    Local hardware provisioning API. Cloud orchestration is outside this
+    service. A bearer token is required except for direct requests whose client
+    and Host addresses are both IP loopback addresses (127.0.0.0/8 or ::1).
 servers:
   - url: http://{station}:8042/api/v1
     variables:
@@ -89,6 +92,31 @@ paths:
                 $ref: "#/components/schemas/StoredArtifact"
         "404":
           $ref: "#/components/responses/NotFound"
+  /xilinx/targets:
+    get:
+      summary: Discover ZynqMP devices attached to a Xilinx hardware server
+      parameters:
+        - name: hwServerUrl
+          in: query
+          required: true
+          schema:
+            type: string
+          example: tcp:127.0.0.1:3121
+      responses:
+        "200":
+          description: Discoverable PSU targets with cable and device identity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [targets]
+                properties:
+                  targets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/XilinxTarget"
+        "400":
+          $ref: "#/components/responses/BadRequest"
   /jobs:
     get:
       summary: List provisioning jobs
@@ -307,6 +335,24 @@ components:
               type: string
         authRequired:
           type: boolean
+          description: Whether this request origin must provide the configured bearer token.
+    XilinxTarget:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          pattern: "^[1-9][0-9]*$"
+        name:
+          type: string
+        deviceIndex:
+          type: string
+        deviceName:
+          type: string
+        cableName:
+          type: string
+        cableSerial:
+          type: string
     StoredArtifact:
       type: object
       required: [id, importedUtc, compressedBytes, uncompressedBytes, hasSignature, manifest]
@@ -345,6 +391,10 @@ components:
         boardIp:
           type: string
           format: ipv4
+        targetId:
+          type: string
+          pattern: "^[1-9][0-9]*$"
+          description: XSDB PSU target selected by the target-discovery endpoint.
     Job:
       type: object
       required: [id, request, state, createdUtc, eventCount]

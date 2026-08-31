@@ -24,6 +24,7 @@ type Request struct {
 	HWServerURL  string `json:"hwServerUrl"`
 	TFTPServerIP string `json:"tftpServerIp"`
 	BoardIP      string `json:"boardIp,omitempty"`
+	TargetID     string `json:"targetId,omitempty"`
 }
 
 type Job struct {

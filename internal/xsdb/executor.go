@@ -29,6 +29,7 @@ type Request struct {
 	HWServerURL   string
 	TFTPServerIP  string
 	BoardIP       string
+	TargetID      string
 	WorkingFolder string
 }
 
@@ -176,6 +177,9 @@ func (executor Executor) Run(ctx context.Context, request Request, emit LogFunc)
 	if err := ValidateIPv4("board IP", request.BoardIP, true); err != nil {
 		return err
 	}
+	if err := ValidateTargetID(request.TargetID); err != nil {
+		return err
+	}
 	entrypoint, err := filepath.Abs(request.Entrypoint)
 	if err != nil {
 		return fmt.Errorf("resolve XSDB entrypoint: %w", err)
@@ -186,8 +190,11 @@ func (executor Executor) Run(ctx context.Context, request Request, emit LogFunc)
 	}
 
 	arguments := []string{entrypoint, request.HWServerURL, request.TFTPServerIP}
-	if request.BoardIP != "" {
+	if request.BoardIP != "" || request.TargetID != "" {
 		arguments = append(arguments, request.BoardIP)
+	}
+	if request.TargetID != "" {
+		arguments = append(arguments, request.TargetID)
 	}
 	command := newCommand(ctx, path, arguments...)
 	if request.WorkingFolder != "" {
@@ -224,6 +231,17 @@ func ValidateHWServerURL(value string) error {
 	port, err := strconv.Atoi(portText)
 	if err != nil || port < 1 || port > 65535 {
 		return fmt.Errorf("hw_server URL has an invalid port: %q", value)
+	}
+	return nil
+}
+
+func ValidateTargetID(value string) error {
+	if value == "" {
+		return nil
+	}
+	id, err := strconv.Atoi(value)
+	if err != nil || id <= 0 || strconv.Itoa(id) != value {
+		return fmt.Errorf("XSDB target ID must be a positive decimal integer: %q", value)
 	}
 	return nil
 }
