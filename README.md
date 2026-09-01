@@ -31,8 +31,8 @@ agent exposes the stable boundary they can call later.
 
 - [User guide](doc/README.md) — installation, configuration, browser operation,
   `mnc deploy`, authentication, and troubleshooting.
-- [Serial console API](doc/SERIAL_CONSOLE.md) — FTDI identity, live WebSocket
-  sessions, access leases, and per-job capture.
+- [Serial console API](doc/SERIAL_CONSOLE.md) — serial discovery, FTDI identity,
+  manual tty/COM selection, live WebSocket sessions, and per-job capture.
 - [Building guide](doc/BUILDING.md) — Linux and Windows builds, tests,
   cross-compilation, Debian packages, MSI creation, and release verification.
 
@@ -47,7 +47,9 @@ agent exposes the stable boundary they can call later.
 - Xilinx target discovery and `xsdb` execution against
   `tcp:<host>:<port>` hardware-server URLs, including queued multi-board boots.
 - Stable pairing of each FT2232H JTAG cable with its channel B Linux tty or
-  Windows COM port, plus ANSI browser terminals and bounded RX-only job logs.
+  Windows COM port, with an explicit per-target manual-port fallback. JTAG
+  remains usable without UART; optional consoles provide ANSI terminals and
+  bounded RX-only job logs.
 - A per-job, read-only TFTP server with RFC 1350 reads and `blksize`, `timeout`,
   and `tsize` option negotiation.
 - Linux service/deb packaging, Windows MSI authoring, release archives, and
@@ -151,13 +153,16 @@ The API is rooted at `/api/v1`. Its OpenAPI description is
 1. `POST /api/v1/artifacts` with one multipart `artifact` file.
 2. `GET /api/v1/xilinx/targets?hwServerUrl=...` to discover PSU targets.
 3. Use the `serialPort` association returned for each target, or call
-   `GET /api/v1/serial/ports`. Live consoles use a short-lived session from
-   `POST /api/v1/serial/sessions` and its WebSocket path.
+   `GET /api/v1/serial/ports` to select a tty/COM port manually. Live consoles
+   use a short-lived session from `POST /api/v1/serial/sessions` and its
+   WebSocket path.
 4. `POST /api/v1/jobs` with the artifact ID, connection settings,
    `targetCableSerial`, `targetDeviceIndex`, and the diagnostic `targetId`.
-   Include the matched `serialConsole` to start RX capture before XSDB. Submit
-   one job per target for a multi-board boot. The stable cable identity is
-   resolved inside the boot XSDB process because numeric IDs are session-local.
+   Include the matched `serialConsole` to start RX capture before XSDB, use
+   `selection: "manual"` for an explicit override, or omit it for JTAG-only
+   operation. Submit one job per target for a multi-board boot. The stable cable
+   identity is resolved inside the boot XSDB process because numeric IDs are
+   session-local.
 5. Poll `GET /api/v1/jobs/{id}` and `GET /api/v1/jobs/{id}/events`, or request
    `text/event-stream` for events.
 6. Download captured bytes from

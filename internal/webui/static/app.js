@@ -10,6 +10,7 @@ const state = {
   targets: [],
   serialPorts: [],
   serialWarnings: [],
+  targetSerialPortIds: new Map(),
   targetLoading: false,
   uploadingArtifact: false,
   jobs: [],
@@ -86,7 +87,11 @@ async function loadCapabilities() {
     populateStationAddresses();
     elements["auth-notice"].classList.add("hidden");
     setConnected(true, "Agent online");
-    await Promise.all([loadArtifacts(), loadJobs(), loadSerialPorts()]);
+    await Promise.all([
+      loadArtifacts(),
+      loadJobs(),
+      loadSerialPorts().catch(markSerialUnavailable),
+    ]);
   } catch (error) {
     if (error.status === 401) {
       elements["auth-notice"].classList.remove("hidden");
@@ -98,13 +103,23 @@ async function loadCapabilities() {
   }
 }
 
+function markSerialUnavailable(error) {
+  state.serialPorts = [];
+  state.serialWarnings = [{ message: error.message }];
+  elements["serial-state"].textContent = "Unavailable";
+  elements["serial-state"].title = error.message;
+  renderTargets();
+  renderConsolePorts();
+}
+
 async function loadSerialPorts() {
   const payload = await api("/api/v1/serial/ports");
   state.serialPorts = payload.ports || [];
   state.serialWarnings = payload.warnings || [];
   elements["serial-state"].textContent = state.serialPorts.length ?
-    `${state.serialPorts.length} UART${state.serialPorts.length === 1 ? "" : "s"}` : "None found";
+    `${state.serialPorts.length} port${state.serialPorts.length === 1 ? "" : "s"}` : "None found";
   elements["serial-state"].title = state.serialWarnings.map((warning) => warning.message).join("\n");
+  renderTargets();
   renderConsolePorts();
 }
 
@@ -169,6 +184,7 @@ async function discoverTargets() {
   }
   state.targetLoading = true;
   state.targets = [];
+  state.targetSerialPortIds.clear();
   renderTargets();
   elements["discover-targets"].disabled = true;
   elements["discover-targets"].textContent = "Scanning…";
@@ -177,10 +193,13 @@ async function discoverTargets() {
     const query = new URLSearchParams({ hwServerUrl: hardwareServerURL });
     const payload = await api(`/api/v1/xilinx/targets?${query}`);
     state.targets = payload.targets || [];
+    for (const target of state.targets) {
+      const portId = target.serialAssociation === "matched" ? target.serialPort?.id || "" : "";
+      state.targetSerialPortIds.set(target.id, portId);
+    }
+    await loadSerialPorts().catch(markSerialUnavailable);
     if (!state.targets.length) {
       showFormError("No ZynqMP PSU targets were found on this hardware server.");
-    } else if (!state.targets.some((target) => target.serialAssociation === "matched" && target.serialPort)) {
-      showFormError("JTAG devices were found, but no matching FT2232H channel B UART is visible on this Station.");
     }
   } catch (error) {
     showFormError(error.message);
@@ -212,21 +231,28 @@ function renderTargets() {
     list.append(message);
     return;
   }
-  const firstEligible = state.targets.findIndex(
-    (target) => target.serialAssociation === "matched" && target.serialPort,
-  );
+  const ports = availableConsolePorts();
+  const availablePortIds = new Set(ports.map((port) => port.id));
   state.targets.forEach((target, index) => {
     const serialAvailable = target.serialAssociation === "matched" && target.serialPort;
-    const option = document.createElement("label");
-    option.className = `target-option${serialAvailable ? "" : " unavailable"}`;
+    let selectedPortId = state.targetSerialPortIds.get(target.id) || "";
+    if (selectedPortId && !availablePortIds.has(selectedPortId)) {
+      selectedPortId = "";
+      state.targetSerialPortIds.set(target.id, "");
+    }
+    const option = document.createElement("div");
+    option.className = "target-option";
+    const choice = document.createElement("label");
+    choice.className = "target-choice";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
+    checkbox.id = `target-${target.id}`;
     checkbox.value = target.id;
-    checkbox.disabled = !serialAvailable;
-    checkbox.checked = serialAvailable && (previouslySelected.has(target.id) || (!previouslySelected.size && index === firstEligible));
+    checkbox.checked = previouslySelected.has(target.id) || (!previouslySelected.size && index === 0);
     checkbox.addEventListener("change", () => {
-      if (checkbox.checked && target.serialPort) {
-        elements["console-port"].value = target.serialPort.id;
+      const port = selectedSerialPort(target);
+      if (checkbox.checked && port) {
+        elements["console-port"].value = port.id;
         renderConsolePortDetail();
       }
       updateStartButton();
@@ -242,16 +268,40 @@ function renderTargets() {
     properties.push(`XSDB target ${target.id}`);
     details.textContent = properties.join(" · ");
     const serialMatch = document.createElement("small");
-    serialMatch.className = "serial-match";
+    serialMatch.className = `serial-match${serialAvailable ? "" : " unmatched"}`;
     if (serialAvailable) {
-      serialMatch.textContent = `UART ${target.serialPort.name} · FTDI channel ${target.serialPort.channel}`;
+      serialMatch.textContent = `Automatically matched UART ${target.serialPort.name} · FTDI channel ${target.serialPort.channel}`;
     } else if (target.serialAssociation === "ambiguous") {
-      serialMatch.textContent = "UART unavailable: duplicate FTDI EEPROM serial";
+      serialMatch.textContent = "Automatic UART match unavailable: duplicate FTDI EEPROM serial";
     } else {
-      serialMatch.textContent = "UART unavailable on this Station";
+      serialMatch.textContent = "No automatic UART match; select a port or use JTAG only";
     }
     description.append(name, details, serialMatch);
-    option.append(checkbox, description);
+    choice.append(checkbox, description);
+
+    const serialField = document.createElement("label");
+    serialField.className = "target-serial-field";
+    const serialLabel = document.createElement("span");
+    serialLabel.textContent = "Serial capture";
+    const serialSelect = document.createElement("select");
+    serialSelect.setAttribute("aria-label", `Serial capture for ${name.textContent}`);
+    serialSelect.append(new Option("No serial capture (JTAG only)", ""));
+    for (const port of ports) {
+      const automatic = serialAvailable && target.serialPort.id === port.id;
+      const suffix = automatic ? " · automatic match" : "";
+      serialSelect.append(new Option(`${serialPortLabel(port)}${suffix}`, port.id));
+    }
+    serialSelect.value = selectedPortId;
+    serialSelect.addEventListener("change", () => {
+      state.targetSerialPortIds.set(target.id, serialSelect.value);
+      if (serialSelect.value) {
+        elements["console-port"].value = serialSelect.value;
+        renderConsolePortDetail();
+      }
+      updateStartButton();
+    });
+    serialField.append(serialLabel, serialSelect);
+    option.append(choice, serialField);
     list.append(option);
   });
 }
@@ -263,14 +313,19 @@ function selectedTargets() {
   return state.targets.filter((target) => selectedIDs.has(target.id));
 }
 
+function selectedSerialPort(target) {
+  const portId = state.targetSerialPortIds.get(target.id) || "";
+  return availableConsolePorts().find((port) => port.id === portId);
+}
+
 function updateStartButton() {
   const artifactSelected = state.artifacts.some((item) => item.id === state.selectedArtifact);
   const targets = selectedTargets();
+  const serialSelected = targets.some((target) => selectedSerialPort(target));
   const baudRate = Number(elements["serial-baud"].value);
-  const validBaud = Number.isInteger(baudRate) && baudRate >= 300 && baudRate <= 4000000;
+  const validBaud = !serialSelected || (Number.isInteger(baudRate) && baudRate >= 300 && baudRate <= 4000000);
   elements["start-button"].disabled = !artifactSelected || !state.capabilities?.xsdb?.available ||
-    state.targetLoading || targets.length === 0 || !validBaud ||
-    targets.some((target) => target.serialAssociation !== "matched" || !target.serialPort);
+    state.targetLoading || targets.length === 0 || !validBaud;
 }
 
 async function uploadArtifact(file) {
@@ -390,24 +445,31 @@ async function createJob(event) {
     return;
   }
   if (boardIP) baseRequest.boardIp = boardIP;
+  const serialPorts = targets.map((target) => selectedSerialPort(target)).filter(Boolean);
   const baudRate = Number(elements["serial-baud"].value);
-  if (!Number.isInteger(baudRate) || baudRate < 300 || baudRate > 4000000) {
+  if (serialPorts.length && (!Number.isInteger(baudRate) || baudRate < 300 || baudRate > 4000000)) {
     showFormError("Serial baud must be an integer between 300 and 4000000.");
+    return;
+  }
+  if (new Set(serialPorts.map((port) => port.id)).size !== serialPorts.length) {
+    showFormError("Select a different serial port for each JTAG device, or choose JTAG only.");
     return;
   }
   elements["start-button"].disabled = true;
   const created = [];
   try {
     for (const target of targets) {
-      if (target.serialAssociation !== "matched" || !target.serialPort) {
-        throw new Error(`Target ${target.id} has no safely associated local FTDI UART.`);
-      }
       const targetRequest = { ...baseRequest, targetId: target.id };
       if (target.cableSerial) targetRequest.targetCableSerial = target.cableSerial;
       if (target.deviceIndex !== undefined && target.deviceIndex !== "") {
         targetRequest.targetDeviceIndex = target.deviceIndex;
       }
-      targetRequest.serialConsole = { portId: target.serialPort.id, baudRate };
+      const serialPort = selectedSerialPort(target);
+      if (serialPort) {
+        targetRequest.serialConsole = { portId: serialPort.id, baudRate };
+        const automaticallyMatched = target.serialAssociation === "matched" && target.serialPort?.id === serialPort.id;
+        if (!automaticallyMatched) targetRequest.serialConsole.selection = "manual";
+      }
       const job = await api("/api/v1/jobs", {
         method: "POST", body: JSON.stringify(targetRequest),
       });
@@ -444,6 +506,14 @@ function availableConsolePorts() {
   return Array.from(ports.values());
 }
 
+function serialPortLabel(port) {
+  const details = [port.name];
+  if (port.vendorId && port.productId) details.push(`USB ${port.vendorId}:${port.productId}`);
+  if (port.usbSerial) details.push(`serial ${port.usbSerial}`);
+  if (port.channel) details.push(`channel ${port.channel}`);
+  return details.join(" · ");
+}
+
 function renderConsolePorts() {
   const select = elements["console-port"];
   const selected = select.value;
@@ -454,9 +524,10 @@ function renderConsolePorts() {
   } else {
     for (const port of ports) {
       const target = state.targets.find((item) => item.serialPort?.id === port.id);
-      const identity = target?.cableName || target?.cableSerial || port.usbSerial;
+      const identity = target?.cableName || target?.cableSerial;
       const mode = port.busy ? ` · active at ${port.activeBaudRate} baud${port.hasController ? " · read-only available" : ""}` : "";
-      select.append(new Option(`${identity} · ${port.name}${mode}`, port.id));
+      const pairing = identity ? `${identity} · ` : "";
+      select.append(new Option(`${pairing}${serialPortLabel(port)}${mode}`, port.id));
     }
   }
   if (ports.some((port) => port.id === selected)) select.value = selected;
@@ -476,10 +547,19 @@ function renderConsolePortDetail() {
     return;
   }
   const target = state.targets.find((item) => item.serialPort?.id === port.id);
-  const pairing = target ? `Paired with JTAG cable ${target.cableSerial || target.cableName}. ` : "";
+  const manualTarget = state.targets.find((item) =>
+    state.targetSerialPortIds.get(item.id) === port.id && item.serialPort?.id !== port.id,
+  );
+  const pairing = target ? `Paired with JTAG cable ${target.cableSerial || target.cableName}. ` :
+    manualTarget ? `Selected manually for JTAG cable ${manualTarget.cableSerial || manualTarget.cableName}. ` : "";
   const active = port.busy ? ` Active at ${port.activeBaudRate} baud.` : "";
   const lease = port.hasController ? " Another client holds the write lease." : " A write lease is available.";
-  elements["console-port-detail"].textContent = `${pairing}FTDI ${port.usbSerial}, channel ${port.channel}.${active}${lease}`;
+  const identity = [];
+  if (port.vendorId && port.productId) identity.push(`USB ${port.vendorId}:${port.productId}`);
+  if (port.usbSerial) identity.push(`serial ${port.usbSerial}`);
+  if (port.channel) identity.push(`channel ${port.channel}`);
+  const description = identity.length ? `${identity.join(", ")}.` : "Manually selectable operating-system serial port.";
+  elements["console-port-detail"].textContent = `${pairing}${description}${active}${lease}`;
 }
 
 function ensureTerminal() {
@@ -508,7 +588,7 @@ function ensureTerminal() {
   state.terminal.open(elements["serial-terminal"]);
   state.fitAddon.fit();
   state.terminal.writeln("\x1b[1;32mMonutchee serial console\x1b[0m");
-  state.terminal.writeln("Select an FTDI UART and connect.\r\n");
+  state.terminal.writeln("Select a serial port and connect.\r\n");
   state.terminalInput = state.terminal.onData((data) => {
     if (!state.consoleReady || state.consoleAccess !== "controller" || state.consoleSocket?.readyState !== WebSocket.OPEN) return;
     if (state.consoleSocket.bufferedAmount > (1 << 20)) {
@@ -717,6 +797,7 @@ elements["boot-form"].addEventListener("submit", createJob);
 elements["discover-targets"].addEventListener("click", discoverTargets);
 elements["hw-server-url"].addEventListener("input", () => {
   state.targets = [];
+  state.targetSerialPortIds.clear();
   renderTargets();
   updateStartButton();
 });

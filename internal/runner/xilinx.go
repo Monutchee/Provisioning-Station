@@ -39,6 +39,7 @@ type XilinxConfig struct {
 	MaxBlockSize int
 	JobTimeout   time.Duration
 	Serial       interface {
+		List(context.Context) (serialconsole.Discovery, error)
 		MatchCableSerial(context.Context, string) (serialconsole.Port, string, error)
 	}
 }
@@ -204,20 +205,44 @@ func (runner *Xilinx) Validate(stored artifact.StoredArtifact, request jobs.Requ
 		if err := serialconsole.ValidateBaudRate(request.SerialConsole.BaudRate); request.SerialConsole.BaudRate != 0 && err != nil {
 			return err
 		}
-		if request.TargetCableSerial == "" {
-			return fmt.Errorf("serialConsole requires targetCableSerial")
-		}
 		if runner.config.Serial == nil {
 			return fmt.Errorf("serial console service is unavailable")
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		port, _, err := runner.config.Serial.MatchCableSerial(ctx, request.TargetCableSerial)
-		if err != nil {
-			return fmt.Errorf("match serial console to JTAG cable %q: %w", request.TargetCableSerial, err)
+		selection := request.SerialConsole.Selection
+		if selection == "" {
+			selection = jobs.SerialSelectionMatched
 		}
-		if port.ID != request.SerialConsole.PortID {
-			return fmt.Errorf("serialConsole.portId does not belong to JTAG cable %q", request.TargetCableSerial)
+		switch selection {
+		case jobs.SerialSelectionMatched:
+			if request.TargetCableSerial == "" {
+				return fmt.Errorf("matched serialConsole requires targetCableSerial")
+			}
+			port, _, err := runner.config.Serial.MatchCableSerial(ctx, request.TargetCableSerial)
+			if err != nil {
+				return fmt.Errorf("match serial console to JTAG cable %q: %w", request.TargetCableSerial, err)
+			}
+			if port.ID != request.SerialConsole.PortID {
+				return fmt.Errorf("serialConsole.portId does not belong to JTAG cable %q", request.TargetCableSerial)
+			}
+		case jobs.SerialSelectionManual:
+			discovery, err := runner.config.Serial.List(ctx)
+			if err != nil {
+				return fmt.Errorf("list serial consoles for manual selection: %w", err)
+			}
+			found := false
+			for _, port := range discovery.Ports {
+				if port.ID == request.SerialConsole.PortID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("manually selected serialConsole.portId is not available on this Station")
+			}
+		default:
+			return fmt.Errorf("serialConsole.selection must be %q or %q", jobs.SerialSelectionMatched, jobs.SerialSelectionManual)
 		}
 	}
 	if request.TargetID != "" || request.TargetCableSerial != "" {

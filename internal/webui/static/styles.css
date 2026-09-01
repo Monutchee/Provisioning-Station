@@ -165,16 +165,18 @@ input:focus, select:focus { border-color: var(--green-bright); box-shadow: 0 0 0
 .target-picker-heading span { font-size: 12px; font-weight: 720; }
 .target-list { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .target-list > p { margin: 3px; color: var(--muted); font-size: 11px; }
-.target-option { display: flex; align-items: center; gap: 10px; padding: 9px; border-radius: 8px; cursor: pointer; }
+.target-option { display: grid; grid-template-columns: minmax(0, 1fr) minmax(210px, .72fr); align-items: center; gap: 12px; padding: 9px; border-radius: 8px; }
 .target-option:hover { background: var(--surface-soft); }
-.target-option.unavailable { cursor: not-allowed; opacity: .62; }
-.target-option.unavailable:hover { background: transparent; }
-.target-option input { flex: 0 0 auto; width: 17px; min-height: 17px; padding: 0; accent-color: var(--green); }
-.target-option span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.target-choice { display: flex; align-items: center; gap: 10px; min-width: 0; cursor: pointer; }
+.target-choice input { flex: 0 0 auto; width: 17px; min-height: 17px; padding: 0; accent-color: var(--green); }
+.target-choice > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .target-option strong { font-size: 11px; }
 .target-option small { overflow-wrap: anywhere; }
 .target-option .serial-match { color: var(--green); }
-.target-option.unavailable .serial-match { color: var(--red); }
+.target-option .serial-match.unmatched { color: var(--amber); }
+.target-serial-field { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.target-serial-field > span { color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.target-serial-field select { min-height: 35px; padding-block: 6px; font-size: 10px; }
 
 .icon-button { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 10px; display: grid; place-items: center; color: var(--muted); background: var(--surface); }
 .icon-button svg { width: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -242,6 +244,7 @@ input:focus, select:focus { border-color: var(--green-bright); box-shadow: 0 0 0
   .setup-panel, .activity-panel > .panel-heading { padding: 21px; }
   .field-grid { grid-template-columns: 1fr; }
   .field-grid .wide { grid-column: auto; }
+  .target-option { grid-template-columns: 1fr; }
   .artifact-metadata { grid-template-columns: 1fr; }
   .notice { align-items: stretch; flex-direction: column; }
   .token-form { flex-direction: column; }
