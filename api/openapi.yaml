@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Monutchee Provisioning Station API
-  version: 1.0.0
+  version: 1.1.0
   description: >-
     Local hardware provisioning API. Cloud orchestration is outside this
     service. A bearer token is required except for direct requests whose client
@@ -117,6 +117,86 @@ paths:
                       $ref: "#/components/schemas/XilinxTarget"
         "400":
           $ref: "#/components/responses/BadRequest"
+  /serial/ports:
+    get:
+      summary: Discover supported local FTDI UART channels
+      description: >-
+        Returns channel B of locally attached FT2232H devices (VID 0403,
+        PID 6010). Ports without a unique EEPROM serial are excluded so a
+        future client can use the same stable device identity safely.
+      responses:
+        "200":
+          description: Stable serial-console ports and identity warnings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SerialDiscovery"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /serial/sessions:
+    post:
+      summary: Reserve and configure a live serial-console attachment
+      description: >-
+        Opens or shares the selected port at 8N1. Many observers may attach,
+        but only one controller may hold the write lease. The returned attach
+        token expires after 30 seconds and is used exactly once as the first
+        WebSocket text message; it is never placed in a URL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SerialSessionRequest"
+      responses:
+        "201":
+          description: Pending serial session
+          headers:
+            Cache-Control:
+              schema:
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SerialSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Controller lease is held or the port is open at another baud rate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /serial/sessions/{sessionId}:
+    parameters:
+      - $ref: "#/components/parameters/SerialSessionId"
+    delete:
+      summary: Release a pending or active serial session
+      responses:
+        "204":
+          description: Session released
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /serial/sessions/{sessionId}/stream:
+    parameters:
+      - $ref: "#/components/parameters/SerialSessionId"
+    get:
+      summary: Upgrade to the binary serial WebSocket protocol
+      security: []
+      description: >-
+        Upgrade this same-origin URL to WebSocket. Within five seconds, send
+        one text JSON message `{"type":"attach","token":"..."}` using the
+        one-time token from POST /serial/sessions. The server replies with one
+        `ready` text message. Subsequent server frames are raw RX bytes in
+        binary messages. Controller clients send raw TX bytes in binary
+        messages; observers must not send data. Individual client messages are
+        limited to 64 KiB.
+      responses:
+        "101":
+          description: WebSocket serial stream
+        "404":
+          $ref: "#/components/responses/NotFound"
   /jobs:
     get:
       summary: List provisioning jobs
@@ -213,6 +293,29 @@ paths:
                 type: string
         "404":
           $ref: "#/components/responses/NotFound"
+  /jobs/{jobId}/serial-transcript:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    get:
+      summary: Download the retained RX-only serial transcript for a job
+      responses:
+        "200":
+          description: Raw serial bytes retained during the job
+          headers:
+            X-MNC-Serial-Capture-State:
+              schema:
+                type: string
+                enum: [capturing, complete, truncated, failed]
+            X-MNC-Serial-Truncated:
+              schema:
+                type: boolean
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
 components:
   securitySchemes:
     bearerAuth:
@@ -228,6 +331,12 @@ components:
         pattern: "^[0-9a-f]{64}$"
     JobId:
       name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+    SerialSessionId:
+      name: sessionId
       in: path
       required: true
       schema:
@@ -267,7 +376,7 @@ components:
           format: date-time
     Capabilities:
       type: object
-      required: [apiVersion, version, artifact, executors, operations, tftpListen, network, xsdb, authRequired]
+      required: [apiVersion, version, artifact, executors, operations, tftpListen, network, xsdb, serial, authRequired]
       properties:
         apiVersion:
           const: v1
@@ -333,12 +442,34 @@ components:
               type: string
             error:
               type: string
+        serial:
+          type: object
+          required: [available, defaultBaudRate, maxJobTranscriptBytes, replayBytes, ftdiVendorId, ftdiProductId, uartChannel]
+          properties:
+            available:
+              type: boolean
+            defaultBaudRate:
+              type: integer
+              minimum: 300
+              maximum: 4000000
+            maxJobTranscriptBytes:
+              type: integer
+              minimum: 1
+            replayBytes:
+              type: integer
+              minimum: 0
+            ftdiVendorId:
+              const: "0403"
+            ftdiProductId:
+              const: "6010"
+            uartChannel:
+              const: B
         authRequired:
           type: boolean
           description: Whether this request origin must provide the configured bearer token.
     XilinxTarget:
       type: object
-      required: [id, name]
+      required: [id, name, serialAssociation]
       properties:
         id:
           type: string
@@ -352,6 +483,101 @@ components:
         cableName:
           type: string
         cableSerial:
+          type: string
+        serialAssociation:
+          type: string
+          enum: [matched, not_found, ambiguous]
+          description: Result of matching cableSerial to a local FTDI channel B EEPROM serial.
+        serialPort:
+          $ref: "#/components/schemas/SerialPort"
+    SerialPort:
+      type: object
+      required: [id, name, vendorId, productId, usbSerial, channel, busy, hasController]
+      properties:
+        id:
+          type: string
+          description: Stable hash of VID, PID, shared EEPROM serial, and interface channel.
+        name:
+          type: string
+          description: Current operating-system name such as /dev/ttyUSB1 or COM7.
+        vendorId:
+          const: "0403"
+        productId:
+          const: "6010"
+        usbSerial:
+          type: string
+          minLength: 1
+        channel:
+          const: B
+        busy:
+          type: boolean
+          description: The backend currently has this physical port open.
+        hasController:
+          type: boolean
+          description: A live session currently holds the single write lease.
+        activeBaudRate:
+          type: integer
+          minimum: 300
+          maximum: 4000000
+          description: Present while the backend has the physical port open.
+    SerialWarning:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [serial_missing, serial_duplicate]
+        message:
+          type: string
+        usbSerial:
+          type: string
+    SerialDiscovery:
+      type: object
+      required: [ports, warnings]
+      properties:
+        ports:
+          type: array
+          items:
+            $ref: "#/components/schemas/SerialPort"
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/SerialWarning"
+    SerialSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [portId, access]
+      properties:
+        portId:
+          type: string
+        baudRate:
+          type: integer
+          minimum: 300
+          maximum: 4000000
+          description: Uses the Station default when omitted.
+        access:
+          type: string
+          enum: [observer, controller]
+    SerialSession:
+      type: object
+      required: [id, port, baudRate, access, attachToken, expiresUtc, websocketPath]
+      properties:
+        id:
+          type: string
+        port:
+          $ref: "#/components/schemas/SerialPort"
+        baudRate:
+          type: integer
+        access:
+          type: string
+          enum: [observer, controller]
+        attachToken:
+          type: string
+          writeOnly: true
+        expiresUtc:
+          type: string
+          format: date-time
+        websocketPath:
           type: string
     StoredArtifact:
       type: object
@@ -404,6 +630,19 @@ components:
           type: string
           pattern: "^(0|[1-9][0-9]*)$"
           description: JTAG device index on the selected cable; requires targetCableSerial.
+        serialConsole:
+          type: object
+          additionalProperties: false
+          required: [portId]
+          properties:
+            portId:
+              type: string
+              description: Stable ID of the UART paired to targetCableSerial.
+            baudRate:
+              type: integer
+              minimum: 300
+              maximum: 4000000
+              description: Uses the Station default when omitted.
     Job:
       type: object
       required: [id, request, state, createdUtc, eventCount]
@@ -429,6 +668,29 @@ components:
         eventCount:
           type: integer
           minimum: 0
+        serialCapture:
+          $ref: "#/components/schemas/SerialCapture"
+    SerialCapture:
+      type: object
+      required: [state, receivedBytes, retainedBytes, truncated, startedUtc]
+      properties:
+        state:
+          type: string
+          enum: [capturing, complete, truncated, failed]
+        receivedBytes:
+          type: integer
+          minimum: 0
+        retainedBytes:
+          type: integer
+          minimum: 0
+        truncated:
+          type: boolean
+        startedUtc:
+          type: string
+          format: date-time
+        finishedUtc:
+          type: string
+          format: date-time
     Event:
       type: object
       required: [sequence, time, level, message]

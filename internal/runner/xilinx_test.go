@@ -16,6 +16,7 @@ import (
 
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
 	"github.com/Monutchee/Provisioning-Station/internal/jobs"
+	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
 
@@ -24,6 +25,15 @@ type fakeXSDB struct{}
 func (fakeXSDB) Resolve() (string, error) { return "xsdb", nil }
 
 func (fakeXSDB) Run(context.Context, xsdb.Request, xsdb.LogFunc) error { return nil }
+
+type fakeSerialMatcher struct{ port serialconsole.Port }
+
+func (matcher fakeSerialMatcher) MatchCableSerial(_ context.Context, serialNumber string) (serialconsole.Port, string, error) {
+	if matcher.port.USBSerial != serialNumber {
+		return serialconsole.Port{}, "not_found", serialconsole.ErrPortNotFound
+	}
+	return matcher.port, "matched", nil
+}
 
 func TestExpectedTFTPFiles(t *testing.T) {
 	manifest := artifact.Manifest{
@@ -108,6 +118,44 @@ func TestXilinxRejectsV1LoaderForStableTargetJob(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "rebuild the Station artifact") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestXilinxRequiresSerialPortPairedWithCable(t *testing.T) {
+	root := t.TempDir()
+	entrypoint := filepath.Join(root, "jtag", "load-jtag-image.tcl")
+	if err := os.MkdirAll(filepath.Dir(entrypoint), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entrypoint, []byte("# MNC_STATION_TARGET_SELECTOR_V2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	port := serialconsole.Port{ID: "uart-a", USBSerial: "BOARD-A", Channel: serialconsole.FT2232HUARTChannel}
+	hardwareRunner, err := NewXilinx(XilinxConfig{Executor: fakeXSDB{}, Serial: fakeSerialMatcher{port: port}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := artifact.StoredArtifact{
+		RootPath: root,
+		Manifest: artifact.Manifest{
+			Artifact: artifact.ArtifactMetadata{Vendor: "xilinx", Operation: "jtag-boot"},
+			Executor: artifact.ExecutorMetadata{
+				Type: "xilinx-xsdb", Entrypoint: "jtag/load-jtag-image.tcl", TFTPRoot: "tftp",
+			},
+			Files: map[string]artifact.FileDescriptor{"tftp/Image": {}},
+		},
+	}
+	request := jobs.Request{
+		HWServerURL: "tcp:127.0.0.1:3121", TFTPServerIP: "192.0.2.10",
+		TargetID: "3", TargetCableSerial: "BOARD-A", TargetDeviceIndex: "0",
+		SerialConsole: &jobs.SerialConsoleRequest{PortID: port.ID, BaudRate: 115200},
+	}
+	if err := hardwareRunner.Validate(stored, request); err != nil {
+		t.Fatalf("matching UART rejected: %v", err)
+	}
+	request.SerialConsole.PortID = "uart-b"
+	if err := hardwareRunner.Validate(stored, request); err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("mismatched UART error = %v", err)
 	}
 }
 

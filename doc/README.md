@@ -16,11 +16,9 @@ Browser or mnc deploy
         | HTTP API (default 0.0.0.0:8042)
         v
 Provisioning Station
-   |             |
-   | XSDB        | read-only TFTP (UDP 69)
-   v             v
-Xilinx        target board
-hw_server
+   | XSDB             | read-only TFTP       | FTDI channel B UART
+   v                  v                      v
+Xilinx hw_server ── JTAG ──> target board <──┘
 ```
 
 XSDB runs on the Station computer. The Xilinx `hw_server` can run on that same
@@ -36,6 +34,8 @@ Before starting a real JTAG boot, make sure that:
 - A local or remote Xilinx `hw_server` is running and reachable, normally on
   TCP port 3121.
 - The JTAG adapter is visible to `hw_server`.
+- The FT2232H channel B tty/COM port is visible on the Station computer and
+  its EEPROM serial is unique. Channel A remains the JTAG interface.
 - The target board can reach the Station computer over the provisioning
   network.
 - UDP port 69 is available for the Station's TFTP listener.
@@ -114,6 +114,12 @@ systemctl status mnc-station
 journalctl -u mnc-station -f
 ```
 
+The package adds the `mnc-station` service account to the `dialout` group when
+that group exists, allowing it to open FTDI tty devices after installation.
+For a portable launch, add your own user to the distribution's serial-port
+group and begin a new login session. Keep normal device permissions; do not
+make `/dev/ttyUSB*` world-writable.
+
 The service listens on every IPv4 interface. A direct local connection at
 `http://127.0.0.1:8042/` skips token verification. From another computer, open:
 
@@ -186,6 +192,11 @@ Firewall on the trusted provisioning network. If the MSI Start menu shortcut
 is used, configure `MNC_XSDB` as a persistent user or system environment
 variable, or make XSDB available on `PATH`.
 
+The FTDI virtual COM port driver must be installed and the channel B COM port
+must not already be open in another terminal program. Station discovers the
+COM number dynamically and uses the adapter's EEPROM serial for stable
+pairing.
+
 Stop a foreground Station with `Ctrl+C` on either platform.
 
 ## Boot from the browser dashboard
@@ -201,8 +212,9 @@ Stop a foreground Station with `Ctrl+C` on either platform.
 6. Enter the hardware-server URL. Use `tcp:127.0.0.1:3121` for a local
    `hw_server`, or for example `tcp:192.0.2.40:3121` for a remote server.
 7. Scan the hardware server and select one or more JTAG devices. Cable serial,
-   device name/index, and XSDB target ID identify each entry. Multiple devices
-   create sequential jobs using the same artifact.
+   device name/index, XSDB target ID, and its paired local UART identify each
+   entry. A target without one safe FTDI channel B match is disabled. Multiple
+   devices create sequential jobs using the same artifact.
 8. Verify the prefilled Station TFTP IPv4 address. The dashboard selects the
    first usable interface reported by the operating system and lists every
    detected interface/IP. On a multi-NIC Station, select an entry or manually
@@ -211,7 +223,11 @@ Stop a foreground Station with `Ctrl+C` on either platform.
 9. Optionally enter the board IPv4 address. When supplied, the TFTP server
    rejects requests from other client addresses. Leave it empty for a
    multi-device boot so DHCP can assign each board a unique address.
-10. Start the jobs and follow their ordered event logs.
+10. Confirm the serial baud rate, then start the jobs and follow their ordered
+    event logs. UART capture opens before XSDB and is retained with the job.
+11. Use the Serial console panel to connect interactively. One browser or API
+    client can type at a time; additional clients attach read-only. Select a
+    completed job and load its retained transcript from the same panel.
 
 A job succeeds only when XSDB exits successfully and every file below the
 artifact's `tftpRoot` has been requested and transferred. Canceling a queued
@@ -286,6 +302,8 @@ The commonly used settings are:
 | `--job-timeout` | — | `10m` |
 | `--max-artifact-bytes` | — | 2 GiB |
 | `--max-unpacked-bytes` | — | 8 GiB |
+| `--serial-baud` | `MNC_STATION_SERIAL_BAUD` | `115200` |
+| `--max-console-log-bytes` | `MNC_STATION_MAX_CONSOLE_LOG_BYTES` | 16 MiB |
 
 Run `mnc-station serve -help` for the complete option list.
 
@@ -326,7 +344,9 @@ front of the Station before allowing control from outside a trusted station
 network. The health endpoint remains public.
 
 The full automation contract is documented in
-[`api/openapi.yaml`](../api/openapi.yaml).
+[`api/openapi.yaml`](../api/openapi.yaml). Serial identity, WebSocket framing,
+leases, and capture behavior are explained in
+[`SERIAL_CONSOLE.md`](SERIAL_CONSOLE.md).
 
 ## Troubleshooting
 
@@ -381,6 +401,20 @@ The full automation contract is documented in
 - Use the exact `tcp:<host>:<port>` form.
 - Test TCP connectivity from the Station computer and check firewalls between
   the two hosts.
+
+### A JTAG device has no paired serial console
+
+- Confirm the adapter is an FT2232H with VID:PID `0403:6010` and that channel B
+  appears as `/dev/ttyUSB*` or a Windows COM port on the Station computer.
+- A remote `hw_server` does not make its host's COM port available remotely;
+  the matching UART must be attached to the Station host.
+- Program a unique, non-empty FTDI EEPROM serial. Duplicate serials are
+  rejected because they cannot be associated safely.
+- On Linux, check the Station user's serial-port group membership and tty
+  permissions. On Windows, close other terminal applications that may own the
+  COM port.
+- A baud conflict means another Station attachment already has the port open
+  at a different rate. Disconnect it or select the active rate.
 
 ### A job remains queued
 

@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <meta name="description" content="Local Monutchee Provisioning Station">
   <title>Monutchee Provisioning Station</title>
+  <link rel="stylesheet" href="/vendor/xterm/xterm.css">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -42,6 +43,10 @@
         <div>
           <dt>TFTP listener</dt>
           <dd id="tftp-listen">—</dd>
+        </div>
+        <div>
+          <dt>Serial</dt>
+          <dd id="serial-state">Checking</dd>
         </div>
       </dl>
     </section>
@@ -132,6 +137,11 @@
               <input id="board-ip" name="boardIp" placeholder="192.168.1.20" inputmode="decimal" spellcheck="false">
               <small>Overrides the artifact default</small>
             </label>
+            <label class="field">
+              <span>Serial baud</span>
+              <input id="serial-baud" name="serialBaud" type="number" min="300" max="4000000" step="1" value="115200" required>
+              <small>8 data bits, no parity, 1 stop bit</small>
+            </label>
           </div>
           <div class="form-error hidden" id="form-error" role="alert"></div>
           <button id="start-button" type="submit" class="button primary" disabled>
@@ -175,9 +185,37 @@
         </div>
       </section>
     </div>
+
+    <section class="panel console-panel" aria-labelledby="console-title">
+      <div class="panel-heading">
+        <div>
+          <p class="step">03</p>
+          <h2 id="console-title">Serial console</h2>
+        </div>
+        <span class="badge console-status" id="console-status">Disconnected</span>
+      </div>
+      <div class="console-toolbar">
+        <label class="field console-device-field">
+          <span>FTDI UART channel</span>
+          <select id="console-port">
+            <option value="">No serial consoles detected</option>
+          </select>
+          <small id="console-port-detail">Scan JTAG devices to see their paired UART channels.</small>
+        </label>
+        <button id="console-connect" type="button" class="button scan-button" disabled>Connect</button>
+        <button id="console-disconnect" type="button" class="button danger hidden">Disconnect</button>
+        <button id="console-transcript" type="button" class="button scan-button hidden">Load job transcript</button>
+      </div>
+      <div class="terminal-frame">
+        <div id="serial-terminal" aria-label="Serial terminal"></div>
+      </div>
+      <p class="console-help">A live console requests the single write lease and falls back to read-only when another operator controls the port. Job capture remains read-only and retains up to the configured transcript limit.</p>
+    </section>
   </main>
 
   <div class="toast hidden" id="toast" role="status"></div>
+  <script src="/vendor/xterm/xterm.js" defer></script>
+  <script src="/vendor/xterm/addon-fit.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

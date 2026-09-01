@@ -21,8 +21,10 @@
                 Description="Open the local provisioning dashboard"
                 Arguments="serve --open-browser"
                 WorkingDirectory="INSTALLFOLDER"
-                Advertise="yes" />
+              Advertise="yes" />
           </File>
+          <File Id="StationLicenseFile" Source="$(var.SourceDir)\LICENSE" />
+          <File Id="StationThirdPartyNoticesFile" Source="$(var.SourceDir)\THIRD_PARTY_NOTICES.md" />
         </Component>
       </Directory>
     </StandardDirectory>

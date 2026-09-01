@@ -41,12 +41,16 @@ install -d -m 0755 \
 install -m 0755 "${BINARY}" "${PACKAGE_ROOT}/usr/bin/mnc-station"
 install -m 0644 "${PROJECT_ROOT}/LICENSE" \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station/LICENSE"
+install -m 0644 "${PROJECT_ROOT}/THIRD_PARTY_NOTICES.md" \
+    "${PACKAGE_ROOT}/usr/share/doc/mnc-station/THIRD_PARTY_NOTICES.md"
 install -m 0644 "${PROJECT_ROOT}/README.md" \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station/README.md"
 install -m 0644 "${PROJECT_ROOT}/doc/README.md" \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station/doc/README.md"
 install -m 0644 "${PROJECT_ROOT}/doc/BUILDING.md" \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station/doc/BUILDING.md"
+install -m 0644 "${PROJECT_ROOT}/doc/SERIAL_CONSOLE.md" \
+    "${PACKAGE_ROOT}/usr/share/doc/mnc-station/doc/SERIAL_CONSOLE.md"
 install -m 0644 "${PROJECT_ROOT}/api/openapi.yaml" \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station/api/openapi.yaml"
 install -m 0644 "${PROJECT_ROOT}/packaging/bash-completion/mnc-station" \
@@ -79,6 +83,9 @@ fi
 if ! getent passwd mnc-station >/dev/null; then
     adduser --system --ingroup mnc-station --home /var/lib/mnc-station \
         --no-create-home --disabled-login mnc-station >/dev/null
+fi
+if getent group dialout >/dev/null; then
+    adduser mnc-station dialout >/dev/null 2>&1 || true
 fi
 install -d -m 0700 -o mnc-station -g mnc-station /var/lib/mnc-station
 if command -v systemctl >/dev/null 2>&1; then
