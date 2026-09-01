@@ -23,14 +23,20 @@
                 WorkingDirectory="INSTALLFOLDER"
               Advertise="yes" />
           </File>
-          <File Id="StationLicenseFile" Source="$(var.SourceDir)\LICENSE" />
-          <File Id="StationThirdPartyNoticesFile" Source="$(var.SourceDir)\THIRD_PARTY_NOTICES.md" />
+        </Component>
+        <Component Id="StationLicense" Guid="*" Bitness="always64">
+          <File Id="StationLicenseFile" Source="$(var.SourceDir)\LICENSE" KeyPath="yes" />
+        </Component>
+        <Component Id="StationThirdPartyNotices" Guid="*" Bitness="always64">
+          <File Id="StationThirdPartyNoticesFile" Source="$(var.SourceDir)\THIRD_PARTY_NOTICES.md" KeyPath="yes" />
         </Component>
       </Directory>
     </StandardDirectory>
 
     <Feature Id="MainFeature" Title="Provisioning Station" Level="1">
       <ComponentRef Id="StationExecutable" />
+      <ComponentRef Id="StationLicense" />
+      <ComponentRef Id="StationThirdPartyNotices" />
     </Feature>
   </Package>
 </Wix>
