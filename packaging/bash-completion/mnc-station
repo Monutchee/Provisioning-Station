@@ -47,7 +47,7 @@ _mnc_station()
                     _mnc_station_complete_files "" "${cur}"
                     return
                     ;;
-                --http-listen|-http-listen|--tftp-listen|-tftp-listen|--max-artifact-bytes|-max-artifact-bytes|--max-unpacked-bytes|-max-unpacked-bytes)
+                --http-listen|-http-listen|--tftp-listen|-tftp-listen|--max-artifact-bytes|-max-artifact-bytes|--max-unpacked-bytes|-max-unpacked-bytes|--serial-baud|-serial-baud|--max-console-log-bytes|-max-console-log-bytes)
                     COMPREPLY=()
                     return
                     ;;
@@ -56,7 +56,7 @@ _mnc_station()
                     return
                     ;;
             esac
-            mapfile -t COMPREPLY < <(compgen -W '--http-listen --tftp-listen --data-dir --xsdb-path --api-token-file --job-timeout --max-artifact-bytes --max-unpacked-bytes --open-browser --help -h' -- "${cur}")
+            mapfile -t COMPREPLY < <(compgen -W '--http-listen --tftp-listen --data-dir --xsdb-path --api-token-file --job-timeout --max-artifact-bytes --max-unpacked-bytes --serial-baud --max-console-log-bytes --open-browser --help -h' -- "${cur}")
             ;;
         inspect)
             if [[ "${cur}" == -* ]]; then

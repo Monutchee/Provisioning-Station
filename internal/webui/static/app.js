@@ -8,25 +8,36 @@ const state = {
   capabilities: null,
   artifacts: [],
   targets: [],
+  serialPorts: [],
+  serialWarnings: [],
   targetLoading: false,
   uploadingArtifact: false,
   jobs: [],
   selectedArtifact: "",
   selectedJob: "",
-  eventSource: null,
   jobTimer: null,
   toastTimer: null,
+  terminal: null,
+  fitAddon: null,
+  terminalInput: null,
+  consoleSocket: null,
+  consoleSessionId: "",
+  consoleAccess: "",
+  consoleReady: false,
+  consoleGeneration: 0,
 };
 
 const elements = Object.fromEntries([
-  "agent-state", "agent-version", "xsdb-state", "tftp-listen", "auth-notice",
+  "agent-state", "agent-version", "xsdb-state", "tftp-listen", "serial-state", "auth-notice",
   "token-form", "api-token", "drop-zone", "artifact-file", "upload-progress",
   "artifact-select", "artifact-count", "artifact-card", "artifact-vendor",
   "artifact-name", "artifact-details", "artifact-sha", "artifact-built",
   "boot-form", "hw-server-url", "discover-targets", "target-list",
-  "tftp-server-ip", "tftp-server-ip-options", "board-ip", "form-error", "start-button", "refresh-jobs",
+  "tftp-server-ip", "tftp-server-ip-options", "board-ip", "serial-baud", "form-error", "start-button", "refresh-jobs",
   "empty-jobs", "job-workspace", "job-select", "job-state", "job-title",
-  "job-meta", "cancel-button", "timeline", "toast",
+  "job-meta", "cancel-button", "timeline", "console-status", "console-port",
+  "console-port-detail", "console-connect", "console-disconnect", "console-transcript",
+  "serial-terminal", "toast",
 ].map((id) => [id, document.getElementById(id)]));
 
 async function api(path, options = {}) {
@@ -44,8 +55,18 @@ async function api(path, options = {}) {
   return payload;
 }
 
-function authQuery() {
-  return state.token ? `?access_token=${encodeURIComponent(state.token)}` : "";
+async function apiBytes(path) {
+  const headers = new Headers();
+  if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
+  const response = await fetch(path, { headers });
+  if (!response.ok) {
+    const contentType = response.headers.get("Content-Type") || "";
+    const payload = contentType.includes("application/json") ? await response.json() : null;
+    const error = new Error(payload?.error?.message || `${response.status} ${response.statusText}`);
+    error.status = response.status;
+    throw error;
+  }
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 function setConnected(connected, label) {
@@ -61,10 +82,11 @@ async function loadCapabilities() {
     elements["tftp-listen"].textContent = state.capabilities.tftpListen;
     elements["xsdb-state"].textContent = state.capabilities.xsdb.available ? "Ready" : "Not found";
     elements["xsdb-state"].title = state.capabilities.xsdb.path || state.capabilities.xsdb.error || "";
+    elements["serial-baud"].value = state.capabilities.serial?.defaultBaudRate || 115200;
     populateStationAddresses();
     elements["auth-notice"].classList.add("hidden");
     setConnected(true, "Agent online");
-    await Promise.all([loadArtifacts(), loadJobs()]);
+    await Promise.all([loadArtifacts(), loadJobs(), loadSerialPorts()]);
   } catch (error) {
     if (error.status === 401) {
       elements["auth-notice"].classList.remove("hidden");
@@ -74,6 +96,16 @@ async function loadCapabilities() {
     setConnected(false, "Agent unavailable");
     showToast(error.message);
   }
+}
+
+async function loadSerialPorts() {
+  const payload = await api("/api/v1/serial/ports");
+  state.serialPorts = payload.ports || [];
+  state.serialWarnings = payload.warnings || [];
+  elements["serial-state"].textContent = state.serialPorts.length ?
+    `${state.serialPorts.length} UART${state.serialPorts.length === 1 ? "" : "s"}` : "None found";
+  elements["serial-state"].title = state.serialWarnings.map((warning) => warning.message).join("\n");
+  renderConsolePorts();
 }
 
 function populateStationAddresses() {
@@ -145,7 +177,11 @@ async function discoverTargets() {
     const query = new URLSearchParams({ hwServerUrl: hardwareServerURL });
     const payload = await api(`/api/v1/xilinx/targets?${query}`);
     state.targets = payload.targets || [];
-    if (!state.targets.length) showFormError("No ZynqMP PSU targets were found on this hardware server.");
+    if (!state.targets.length) {
+      showFormError("No ZynqMP PSU targets were found on this hardware server.");
+    } else if (!state.targets.some((target) => target.serialAssociation === "matched" && target.serialPort)) {
+      showFormError("JTAG devices were found, but no matching FT2232H channel B UART is visible on this Station.");
+    }
   } catch (error) {
     showFormError(error.message);
   } finally {
@@ -153,12 +189,16 @@ async function discoverTargets() {
     renderTargets();
     elements["discover-targets"].disabled = false;
     elements["discover-targets"].textContent = "Scan devices";
+    renderConsolePorts();
     updateStartButton();
   }
 }
 
 function renderTargets() {
   const list = elements["target-list"];
+  const previouslySelected = new Set(
+    Array.from(list.querySelectorAll('input[type="checkbox"]:checked'), (input) => input.value),
+  );
   list.replaceChildren();
   if (state.targetLoading) {
     const message = document.createElement("p");
@@ -172,14 +212,25 @@ function renderTargets() {
     list.append(message);
     return;
   }
+  const firstEligible = state.targets.findIndex(
+    (target) => target.serialAssociation === "matched" && target.serialPort,
+  );
   state.targets.forEach((target, index) => {
+    const serialAvailable = target.serialAssociation === "matched" && target.serialPort;
     const option = document.createElement("label");
-    option.className = "target-option";
+    option.className = `target-option${serialAvailable ? "" : " unavailable"}`;
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.value = target.id;
-    checkbox.checked = index === 0;
-    checkbox.addEventListener("change", updateStartButton);
+    checkbox.disabled = !serialAvailable;
+    checkbox.checked = serialAvailable && (previouslySelected.has(target.id) || (!previouslySelected.size && index === firstEligible));
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked && target.serialPort) {
+        elements["console-port"].value = target.serialPort.id;
+        renderConsolePortDetail();
+      }
+      updateStartButton();
+    });
     const description = document.createElement("span");
     const name = document.createElement("strong");
     name.textContent = target.cableName || target.cableSerial || `JTAG target ${target.id}`;
@@ -190,7 +241,16 @@ function renderTargets() {
     if (target.deviceIndex !== undefined && target.deviceIndex !== "") properties.push(`device ${target.deviceIndex}`);
     properties.push(`XSDB target ${target.id}`);
     details.textContent = properties.join(" · ");
-    description.append(name, details);
+    const serialMatch = document.createElement("small");
+    serialMatch.className = "serial-match";
+    if (serialAvailable) {
+      serialMatch.textContent = `UART ${target.serialPort.name} · FTDI channel ${target.serialPort.channel}`;
+    } else if (target.serialAssociation === "ambiguous") {
+      serialMatch.textContent = "UART unavailable: duplicate FTDI EEPROM serial";
+    } else {
+      serialMatch.textContent = "UART unavailable on this Station";
+    }
+    description.append(name, details, serialMatch);
     option.append(checkbox, description);
     list.append(option);
   });
@@ -205,8 +265,12 @@ function selectedTargets() {
 
 function updateStartButton() {
   const artifactSelected = state.artifacts.some((item) => item.id === state.selectedArtifact);
+  const targets = selectedTargets();
+  const baudRate = Number(elements["serial-baud"].value);
+  const validBaud = Number.isInteger(baudRate) && baudRate >= 300 && baudRate <= 4000000;
   elements["start-button"].disabled = !artifactSelected || !state.capabilities?.xsdb?.available ||
-    state.targetLoading || selectedTargets().length === 0;
+    state.targetLoading || targets.length === 0 || !validBaud ||
+    targets.some((target) => target.serialAssociation !== "matched" || !target.serialPort);
 }
 
 async function uploadArtifact(file) {
@@ -256,7 +320,10 @@ function renderJobs() {
   const hasJobs = state.jobs.length > 0;
   elements["empty-jobs"].classList.toggle("hidden", hasJobs);
   elements["job-workspace"].classList.toggle("hidden", !hasJobs);
-  if (!hasJobs) return;
+  if (!hasJobs) {
+    elements["console-transcript"].classList.add("hidden");
+    return;
+  }
   const select = elements["job-select"];
   select.replaceChildren();
   for (const job of state.jobs) {
@@ -272,6 +339,7 @@ function renderJobs() {
   const target = job.request.targetId ? ` · target ${job.request.targetId}` : "";
   elements["job-meta"].textContent = `${job.request.hwServerUrl}${target} · ${formatTime(job.createdUtc)}`;
   elements["cancel-button"].classList.toggle("hidden", ["succeeded", "failed", "canceled"].includes(job.state));
+  elements["console-transcript"].classList.toggle("hidden", !job.serialCapture);
   scheduleJobRefresh(job);
 }
 
@@ -322,15 +390,24 @@ async function createJob(event) {
     return;
   }
   if (boardIP) baseRequest.boardIp = boardIP;
+  const baudRate = Number(elements["serial-baud"].value);
+  if (!Number.isInteger(baudRate) || baudRate < 300 || baudRate > 4000000) {
+    showFormError("Serial baud must be an integer between 300 and 4000000.");
+    return;
+  }
   elements["start-button"].disabled = true;
   const created = [];
   try {
     for (const target of targets) {
+      if (target.serialAssociation !== "matched" || !target.serialPort) {
+        throw new Error(`Target ${target.id} has no safely associated local FTDI UART.`);
+      }
       const targetRequest = { ...baseRequest, targetId: target.id };
       if (target.cableSerial) targetRequest.targetCableSerial = target.cableSerial;
       if (target.deviceIndex !== undefined && target.deviceIndex !== "") {
         targetRequest.targetDeviceIndex = target.deviceIndex;
       }
+      targetRequest.serialConsole = { portId: target.serialPort.id, baudRate };
       const job = await api("/api/v1/jobs", {
         method: "POST", body: JSON.stringify(targetRequest),
       });
@@ -355,6 +432,238 @@ async function cancelJob() {
     await loadJobs();
     showToast("Cancellation requested");
   } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function availableConsolePorts() {
+  const ports = new Map(state.serialPorts.map((port) => [port.id, port]));
+  for (const target of state.targets) {
+    if (target.serialPort) ports.set(target.serialPort.id, target.serialPort);
+  }
+  return Array.from(ports.values());
+}
+
+function renderConsolePorts() {
+  const select = elements["console-port"];
+  const selected = select.value;
+  const ports = availableConsolePorts();
+  select.replaceChildren();
+  if (!ports.length) {
+    select.append(new Option("No serial consoles detected", ""));
+  } else {
+    for (const port of ports) {
+      const target = state.targets.find((item) => item.serialPort?.id === port.id);
+      const identity = target?.cableName || target?.cableSerial || port.usbSerial;
+      const mode = port.busy ? ` · active at ${port.activeBaudRate} baud${port.hasController ? " · read-only available" : ""}` : "";
+      select.append(new Option(`${identity} · ${port.name}${mode}`, port.id));
+    }
+  }
+  if (ports.some((port) => port.id === selected)) select.value = selected;
+  select.disabled = Boolean(state.consoleSocket) || !ports.length;
+  elements["serial-baud"].disabled = Boolean(state.consoleSocket);
+  elements["console-connect"].disabled = Boolean(state.consoleSocket) || !select.value;
+  elements["console-connect"].classList.toggle("hidden", Boolean(state.consoleSocket));
+  elements["console-disconnect"].classList.toggle("hidden", !state.consoleSocket);
+  renderConsolePortDetail();
+}
+
+function renderConsolePortDetail() {
+  const port = availableConsolePorts().find((item) => item.id === elements["console-port"].value);
+  if (!port) {
+    const warning = state.serialWarnings[0]?.message;
+    elements["console-port-detail"].textContent = warning || "Scan JTAG devices to see their paired UART channels.";
+    return;
+  }
+  const target = state.targets.find((item) => item.serialPort?.id === port.id);
+  const pairing = target ? `Paired with JTAG cable ${target.cableSerial || target.cableName}. ` : "";
+  const active = port.busy ? ` Active at ${port.activeBaudRate} baud.` : "";
+  const lease = port.hasController ? " Another client holds the write lease." : " A write lease is available.";
+  elements["console-port-detail"].textContent = `${pairing}FTDI ${port.usbSerial}, channel ${port.channel}.${active}${lease}`;
+}
+
+function ensureTerminal() {
+  if (state.terminal) return;
+  if (!globalThis.Terminal || !globalThis.FitAddon?.FitAddon) {
+    throw new Error("The embedded terminal assets could not be loaded.");
+  }
+  state.terminal = new globalThis.Terminal({
+    allowProposedApi: false,
+    convertEol: false,
+    cursorBlink: true,
+    cursorStyle: "block",
+    fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace",
+    fontSize: 13,
+    linkHandler: {
+      activate: () => showToast("Links emitted by the target are disabled"),
+      allowNonHttpProtocols: false,
+    },
+    scrollback: 10000,
+    theme: {
+      background: "#0c1210", foreground: "#dce9e1", cursor: "#56c79d", selectionBackground: "#315345",
+    },
+  });
+  state.fitAddon = new globalThis.FitAddon.FitAddon();
+  state.terminal.loadAddon(state.fitAddon);
+  state.terminal.open(elements["serial-terminal"]);
+  state.fitAddon.fit();
+  state.terminal.writeln("\x1b[1;32mMonutchee serial console\x1b[0m");
+  state.terminal.writeln("Select an FTDI UART and connect.\r\n");
+  state.terminalInput = state.terminal.onData((data) => {
+    if (!state.consoleReady || state.consoleAccess !== "controller" || state.consoleSocket?.readyState !== WebSocket.OPEN) return;
+    if (state.consoleSocket.bufferedAmount > (1 << 20)) {
+      showToast("Serial input paused while the browser catches up");
+      return;
+    }
+    state.consoleSocket.send(new TextEncoder().encode(data));
+  });
+  const resize = () => {
+    try { state.fitAddon.fit(); } catch (_) { /* terminal may be between layouts */ }
+  };
+  if (globalThis.ResizeObserver) {
+    new ResizeObserver(resize).observe(elements["serial-terminal"]);
+  } else {
+    window.addEventListener("resize", resize);
+  }
+}
+
+function setConsoleStatus(label, mode = "") {
+  elements["console-status"].textContent = label;
+  elements["console-status"].className = `badge console-status${mode ? ` ${mode}` : ""}`;
+}
+
+async function requestSerialSession(portId, baudRate, access) {
+  return api("/api/v1/serial/sessions", {
+    method: "POST",
+    body: JSON.stringify({ portId, baudRate, access }),
+  });
+}
+
+async function connectConsole() {
+  const portId = elements["console-port"].value;
+  const baudRate = Number(elements["serial-baud"].value);
+  if (!portId) return;
+  if (!Number.isInteger(baudRate) || baudRate < 300 || baudRate > 4000000) {
+    showToast("Serial baud must be an integer between 300 and 4000000");
+    return;
+  }
+  try {
+    ensureTerminal();
+  } catch (error) {
+    showToast(error.message);
+    return;
+  }
+  elements["console-connect"].disabled = true;
+  setConsoleStatus("Connecting");
+  let access = "controller";
+  let session;
+  try {
+    try {
+      session = await requestSerialSession(portId, baudRate, access);
+    } catch (error) {
+      if (access !== "controller" || error.status !== 409) throw error;
+      access = "observer";
+      await loadSerialPorts();
+      const activePort = availableConsolePorts().find((port) => port.id === portId);
+      const observerBaud = activePort?.activeBaudRate || baudRate;
+      elements["serial-baud"].value = observerBaud;
+      session = await requestSerialSession(portId, observerBaud, access);
+    }
+    const websocketURL = new URL(session.websocketPath, window.location.href);
+    websocketURL.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const socket = new WebSocket(websocketURL);
+    socket.binaryType = "arraybuffer";
+    const generation = ++state.consoleGeneration;
+    state.consoleSocket = socket;
+    state.consoleSessionId = session.id;
+    state.consoleAccess = access;
+    state.consoleReady = false;
+    renderConsolePorts();
+    socket.addEventListener("open", () => {
+      socket.send(JSON.stringify({ type: "attach", token: session.attachToken }));
+    });
+    socket.addEventListener("message", async (event) => {
+      if (generation !== state.consoleGeneration) return;
+      if (typeof event.data === "string") {
+        let message;
+        try { message = JSON.parse(event.data); } catch (_) { return; }
+        if (message.type === "ready") {
+          state.consoleReady = true;
+          state.consoleAccess = message.access;
+          const readOnly = message.access !== "controller";
+          setConsoleStatus(readOnly ? "Connected · read-only" : "Connected · controller", readOnly ? "observer" : "connected");
+          state.terminal.writeln(`\x1b[2mConnected to ${session.port.name} at ${message.baudRate} baud (${message.access}).\x1b[0m\r`);
+        }
+        return;
+      }
+      const bytes = event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : new Uint8Array(await event.data.arrayBuffer());
+      state.terminal.write(bytes);
+    });
+    socket.addEventListener("error", () => {
+      if (generation === state.consoleGeneration) showToast("Serial WebSocket connection failed");
+    });
+    socket.addEventListener("close", (event) => {
+      if (generation !== state.consoleGeneration) return;
+      api(`/api/v1/serial/sessions/${session.id}`, { method: "DELETE" }).catch(() => {});
+      state.consoleSocket = null;
+      state.consoleSessionId = "";
+      state.consoleReady = false;
+      state.consoleAccess = "";
+      setConsoleStatus("Disconnected");
+      renderConsolePorts();
+      if (event.code !== 1000) state.terminal.writeln(`\r\n\x1b[1;31mSerial connection closed (${event.reason || event.code}).\x1b[0m`);
+    });
+  } catch (error) {
+    if (session?.id) {
+      api(`/api/v1/serial/sessions/${session.id}`, { method: "DELETE" }).catch(() => {});
+    }
+    state.consoleSocket = null;
+    state.consoleSessionId = "";
+    state.consoleReady = false;
+    state.consoleAccess = "";
+    setConsoleStatus("Disconnected");
+    renderConsolePorts();
+    showToast(error.message);
+  }
+}
+
+function disconnectConsole() {
+  const socket = state.consoleSocket;
+  const sessionId = state.consoleSessionId;
+  state.consoleGeneration += 1;
+  state.consoleSocket = null;
+  state.consoleSessionId = "";
+  state.consoleReady = false;
+  state.consoleAccess = "";
+  if (socket) socket.close(1000, "operator disconnected");
+  else if (sessionId) api(`/api/v1/serial/sessions/${sessionId}`, { method: "DELETE" }).catch(() => {});
+  setConsoleStatus("Disconnected");
+  renderConsolePorts();
+}
+
+function selectConsoleForJob() {
+  const portId = selectedJob()?.request?.serialConsole?.portId;
+  if (!portId || state.consoleSocket) return;
+  if (availableConsolePorts().some((port) => port.id === portId)) {
+    elements["console-port"].value = portId;
+    renderConsolePortDetail();
+  }
+}
+
+async function loadJobTranscript() {
+  const job = selectedJob();
+  if (!job?.serialCapture) return;
+  try {
+    ensureTerminal();
+    disconnectConsole();
+    setConsoleStatus("Loading transcript");
+    const data = await apiBytes(`/api/v1/jobs/${job.id}/serial-transcript`);
+    state.terminal.reset();
+    state.terminal.write(data);
+    const suffix = job.serialCapture.truncated ? " · truncated" : "";
+    setConsoleStatus(`Transcript · ${formatBytes(data.length)}${suffix}`, job.serialCapture.truncated ? "observer" : "connected");
+  } catch (error) {
+    setConsoleStatus("Disconnected");
     showToast(error.message);
   }
 }
@@ -411,8 +720,20 @@ elements["hw-server-url"].addEventListener("input", () => {
   renderTargets();
   updateStartButton();
 });
+elements["serial-baud"].addEventListener("input", updateStartButton);
 elements["refresh-jobs"].addEventListener("click", () => loadJobs().catch((error) => showToast(error.message)));
-elements["job-select"].addEventListener("change", (event) => { state.selectedJob = event.target.value; renderJobs(); loadEvents(); });
+elements["job-select"].addEventListener("change", (event) => {
+  state.selectedJob = event.target.value;
+  renderJobs();
+  selectConsoleForJob();
+  loadEvents();
+});
 elements["cancel-button"].addEventListener("click", cancelJob);
+elements["console-port"].addEventListener("change", renderConsolePortDetail);
+elements["console-connect"].addEventListener("click", connectConsole);
+elements["console-disconnect"].addEventListener("click", disconnectConsole);
+elements["console-transcript"].addEventListener("click", loadJobTranscript);
+window.addEventListener("beforeunload", () => state.consoleSocket?.close(1000, "page closed"));
 
+try { ensureTerminal(); } catch (error) { showToast(error.message); }
 loadCapabilities();

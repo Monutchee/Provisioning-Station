@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/Monutchee/Provisioning-Station/internal/httpapi"
 	"github.com/Monutchee/Provisioning-Station/internal/jobs"
 	"github.com/Monutchee/Provisioning-Station/internal/runner"
+	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
 
@@ -91,6 +93,8 @@ func runServe(arguments []string) error {
 	flags.DurationVar(&config.JobTimeout, "job-timeout", config.JobTimeout, "maximum duration of one provisioning job")
 	flags.Int64Var(&config.MaxCompressedBytes, "max-artifact-bytes", config.MaxCompressedBytes, "maximum compressed artifact size")
 	flags.Int64Var(&config.MaxUncompressedBytes, "max-unpacked-bytes", config.MaxUncompressedBytes, "maximum extracted artifact size")
+	flags.IntVar(&config.SerialBaud, "serial-baud", config.SerialBaud, "default FTDI serial console baud rate")
+	flags.Int64Var(&config.MaxConsoleLogBytes, "max-console-log-bytes", config.MaxConsoleLogBytes, "maximum retained serial transcript bytes per job")
 	flags.BoolVar(&config.OpenBrowser, "open-browser", false, "open the local dashboard in the default browser")
 	if err := flags.Parse(arguments); err != nil {
 		return err
@@ -111,6 +115,8 @@ type serveConfig struct {
 	JobTimeout           time.Duration
 	MaxCompressedBytes   int64
 	MaxUncompressedBytes int64
+	SerialBaud           int
+	MaxConsoleLogBytes   int64
 	OpenBrowser          bool
 }
 
@@ -120,6 +126,14 @@ func defaultServeConfig() (serveConfig, error) {
 		return serveConfig{}, fmt.Errorf("find user configuration directory: %w", err)
 	}
 	limits := artifact.DefaultLimits()
+	serialBaud, err := environmentInt("MNC_STATION_SERIAL_BAUD", serialconsole.DefaultBaudRate)
+	if err != nil {
+		return serveConfig{}, err
+	}
+	maxConsoleLogBytes, err := environmentInt64("MNC_STATION_MAX_CONSOLE_LOG_BYTES", serialconsole.DefaultLogBytes)
+	if err != nil {
+		return serveConfig{}, err
+	}
 	return serveConfig{
 		HTTPListen:           environmentOr("MNC_STATION_HTTP_LISTEN", "0.0.0.0:8042"),
 		TFTPListen:           environmentOr("MNC_STATION_TFTP_LISTEN", ":69"),
@@ -130,6 +144,8 @@ func defaultServeConfig() (serveConfig, error) {
 		JobTimeout:           10 * time.Minute,
 		MaxCompressedBytes:   limits.MaxCompressedBytes,
 		MaxUncompressedBytes: limits.MaxUncompressedBytes,
+		SerialBaud:           serialBaud,
+		MaxConsoleLogBytes:   maxConsoleLogBytes,
 	}, nil
 }
 
@@ -139,6 +155,12 @@ func serve(config serveConfig) error {
 	}
 	if config.JobTimeout <= 0 {
 		return fmt.Errorf("job timeout must be positive")
+	}
+	if err := serialconsole.ValidateBaudRate(config.SerialBaud); err != nil {
+		return err
+	}
+	if config.MaxConsoleLogBytes <= 0 {
+		return fmt.Errorf("maximum console log bytes must be positive")
 	}
 	token, tokenFile, err := resolveAPIToken(config)
 	if err != nil {
@@ -153,19 +175,29 @@ func serve(config serveConfig) error {
 		return err
 	}
 	executor := xsdb.Executor{Path: config.XSDBPath}
+	consoleManager, err := serialconsole.New(serialconsole.Config{DefaultBaud: config.SerialBaud})
+	if err != nil {
+		return err
+	}
+	defer consoleManager.Close()
 	hardwareRunner, err := runner.NewXilinx(runner.XilinxConfig{
 		Executor: executor, TFTPListen: config.TFTPListen, JobTimeout: config.JobTimeout,
+		Serial: consoleManager,
 	})
 	if err != nil {
 		return err
 	}
-	jobManager, err := jobs.OpenManager(filepath.Join(config.DataDir, "jobs"), store, hardwareRunner)
+	jobManager, err := jobs.OpenManager(
+		filepath.Join(config.DataDir, "jobs"), store, hardwareRunner,
+		jobs.WithSerialConsole(consoleManager, config.MaxConsoleLogBytes),
+	)
 	if err != nil {
 		return err
 	}
 	defer jobManager.Close()
 	api, err := httpapi.New(httpapi.Config{
 		Version: version, APIToken: token, TFTPListen: config.TFTPListen, XSDB: executor,
+		Serial: consoleManager, MaxConsoleLogBytes: config.MaxConsoleLogBytes,
 	}, store, jobManager)
 	if err != nil {
 		return err
@@ -186,6 +218,7 @@ func serve(config serveConfig) error {
 	fmt.Printf("Monutchee Provisioning Station %s\n", version)
 	fmt.Printf("Dashboard: %s\n", url)
 	fmt.Printf("TFTP jobs: %s\n", config.TFTPListen)
+	fmt.Printf("Serial console: FT2232H channel B at %d baud (job logs up to %d bytes)\n", config.SerialBaud, config.MaxConsoleLogBytes)
 	if tokenFile != "" {
 		fmt.Printf("API authentication: required (token file %s)\n", tokenFile)
 	} else if token != "" {
@@ -535,4 +568,28 @@ func environmentOr(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func environmentInt(name string, fallback int) (int, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer: %w", name, err)
+	}
+	return parsed, nil
+}
+
+func environmentInt64(name string, fallback int64) (int64, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer: %w", name, err)
+	}
+	return parsed, nil
 }

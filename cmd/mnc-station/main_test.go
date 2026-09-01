@@ -23,6 +23,25 @@ func TestDefaultServeConfigListensOnAllIPv4Interfaces(t *testing.T) {
 	}
 }
 
+func TestDefaultServeConfigReadsSerialLimits(t *testing.T) {
+	t.Setenv("MNC_STATION_SERIAL_BAUD", "921600")
+	t.Setenv("MNC_STATION_MAX_CONSOLE_LOG_BYTES", "1048576")
+	config, err := defaultServeConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.SerialBaud != 921600 || config.MaxConsoleLogBytes != 1048576 {
+		t.Fatalf("serial config = baud %d, log %d", config.SerialBaud, config.MaxConsoleLogBytes)
+	}
+}
+
+func TestDefaultServeConfigRejectsInvalidSerialEnvironment(t *testing.T) {
+	t.Setenv("MNC_STATION_SERIAL_BAUD", "fast")
+	if _, err := defaultServeConfig(); err == nil || !strings.Contains(err.Error(), "MNC_STATION_SERIAL_BAUD") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestIsLoopbackListen(t *testing.T) {
 	for _, address := range []string{"127.0.0.1:8042", "[::1]:8042", "localhost:8042"} {
 		if !isLoopbackListen(address) {
