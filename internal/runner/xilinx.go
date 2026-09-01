@@ -16,6 +16,7 @@ import (
 
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
 	"github.com/Monutchee/Provisioning-Station/internal/jobs"
+	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
 	"github.com/Monutchee/Provisioning-Station/internal/tftp"
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
@@ -37,6 +38,9 @@ type XilinxConfig struct {
 	TFTPTimeout  time.Duration
 	MaxBlockSize int
 	JobTimeout   time.Duration
+	Serial       interface {
+		MatchCableSerial(context.Context, string) (serialconsole.Port, string, error)
+	}
 }
 
 type Xilinx struct {
@@ -192,6 +196,29 @@ func (runner *Xilinx) Validate(stored artifact.StoredArtifact, request jobs.Requ
 	}
 	if request.TargetDeviceIndex != "" && request.TargetCableSerial == "" {
 		return fmt.Errorf("targetDeviceIndex requires targetCableSerial")
+	}
+	if request.SerialConsole != nil {
+		if request.SerialConsole.PortID == "" {
+			return fmt.Errorf("serialConsole.portId must not be empty")
+		}
+		if err := serialconsole.ValidateBaudRate(request.SerialConsole.BaudRate); request.SerialConsole.BaudRate != 0 && err != nil {
+			return err
+		}
+		if request.TargetCableSerial == "" {
+			return fmt.Errorf("serialConsole requires targetCableSerial")
+		}
+		if runner.config.Serial == nil {
+			return fmt.Errorf("serial console service is unavailable")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		port, _, err := runner.config.Serial.MatchCableSerial(ctx, request.TargetCableSerial)
+		if err != nil {
+			return fmt.Errorf("match serial console to JTAG cable %q: %w", request.TargetCableSerial, err)
+		}
+		if port.ID != request.SerialConsole.PortID {
+			return fmt.Errorf("serialConsole.portId does not belong to JTAG cable %q", request.TargetCableSerial)
+		}
 	}
 	if request.TargetID != "" || request.TargetCableSerial != "" {
 		entrypoint := filepath.Join(stored.RootPath, filepath.FromSlash(manifest.Executor.Entrypoint))

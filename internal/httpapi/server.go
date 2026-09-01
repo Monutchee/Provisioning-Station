@@ -18,6 +18,7 @@ import (
 
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
 	"github.com/Monutchee/Provisioning-Station/internal/jobs"
+	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
 	"github.com/Monutchee/Provisioning-Station/internal/webui"
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
@@ -29,24 +30,36 @@ type Resolver interface {
 	Discover(context.Context, string) ([]xsdb.Target, error)
 }
 
+type SerialService interface {
+	List(context.Context) (serialconsole.Discovery, error)
+	MatchCableSerial(context.Context, string) (serialconsole.Port, string, error)
+	Attach(context.Context, serialconsole.AttachRequest) (*serialconsole.Attachment, error)
+	DefaultBaudRate() int
+	ReplayLimit() int
+}
+
 type Config struct {
-	Version      string
-	APIToken     string
-	TFTPListen   string
-	XSDB         Resolver
-	MaxBodyBytes int64
+	Version            string
+	APIToken           string
+	TFTPListen         string
+	XSDB               Resolver
+	Serial             SerialService
+	MaxBodyBytes       int64
+	MaxConsoleLogBytes int64
 }
 
 type Server struct {
 	config    Config
 	artifacts *artifact.Store
 	jobs      *jobs.Manager
+	serial    SerialService
+	sessions  *serialSessions
 	handler   http.Handler
 }
 
 func New(config Config, artifacts *artifact.Store, jobManager *jobs.Manager) (*Server, error) {
-	if artifacts == nil || jobManager == nil || config.XSDB == nil {
-		return nil, fmt.Errorf("HTTP API requires artifact, job, and XSDB services")
+	if artifacts == nil || jobManager == nil || config.XSDB == nil || config.Serial == nil {
+		return nil, fmt.Errorf("HTTP API requires artifact, job, XSDB, and serial-console services")
 	}
 	if config.Version == "" {
 		config.Version = "dev"
@@ -54,7 +67,13 @@ func New(config Config, artifacts *artifact.Store, jobManager *jobs.Manager) (*S
 	if config.MaxBodyBytes <= 0 {
 		config.MaxBodyBytes = artifacts.Limits().MaxCompressedBytes + (1 << 20)
 	}
-	server := &Server{config: config, artifacts: artifacts, jobs: jobManager}
+	if config.MaxConsoleLogBytes <= 0 {
+		config.MaxConsoleLogBytes = serialconsole.DefaultLogBytes
+	}
+	server := &Server{
+		config: config, artifacts: artifacts, jobs: jobManager, serial: config.Serial,
+		sessions: newSerialSessions(),
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", server.health)
 	mux.Handle("GET /api/v1/capabilities", server.authorize(http.HandlerFunc(server.capabilities)))
@@ -62,11 +81,16 @@ func New(config Config, artifacts *artifact.Store, jobManager *jobs.Manager) (*S
 	mux.Handle("POST /api/v1/artifacts", server.authorize(http.HandlerFunc(server.importArtifact)))
 	mux.Handle("GET /api/v1/artifacts/{id}", server.authorize(http.HandlerFunc(server.getArtifact)))
 	mux.Handle("GET /api/v1/xilinx/targets", server.authorize(http.HandlerFunc(server.xilinxTargets)))
+	mux.Handle("GET /api/v1/serial/ports", server.authorize(http.HandlerFunc(server.serialPorts)))
+	mux.Handle("POST /api/v1/serial/sessions", server.authorize(http.HandlerFunc(server.createSerialSession)))
+	mux.Handle("DELETE /api/v1/serial/sessions/{id}", server.authorize(http.HandlerFunc(server.deleteSerialSession)))
+	mux.HandleFunc("GET /api/v1/serial/sessions/{id}/stream", server.streamSerialSession)
 	mux.Handle("GET /api/v1/jobs", server.authorize(http.HandlerFunc(server.listJobs)))
 	mux.Handle("POST /api/v1/jobs", server.authorize(http.HandlerFunc(server.createJob)))
 	mux.Handle("GET /api/v1/jobs/{id}", server.authorize(http.HandlerFunc(server.getJob)))
 	mux.Handle("POST /api/v1/jobs/{id}/cancel", server.authorize(http.HandlerFunc(server.cancelJob)))
 	mux.Handle("GET /api/v1/jobs/{id}/events", server.authorize(http.HandlerFunc(server.jobEvents)))
+	mux.Handle("GET /api/v1/jobs/{id}/serial-transcript", server.authorize(http.HandlerFunc(server.jobSerialTranscript)))
 	mux.Handle("/", webui.Handler())
 	server.handler = securityHeaders(mux)
 	return server, nil
@@ -115,11 +139,20 @@ func (server *Server) capabilities(response http.ResponseWriter, request *http.R
 			"maxCompressedBytes":   limits.MaxCompressedBytes,
 			"maxUncompressedBytes": limits.MaxUncompressedBytes,
 		},
-		"executors":    []string{"xilinx-xsdb"},
-		"operations":   []string{"jtag-boot"},
-		"tftpListen":   server.config.TFTPListen,
-		"network":      networkStatus,
-		"xsdb":         xsdbStatus,
+		"executors":  []string{"xilinx-xsdb"},
+		"operations": []string{"jtag-boot"},
+		"tftpListen": server.config.TFTPListen,
+		"network":    networkStatus,
+		"xsdb":       xsdbStatus,
+		"serial": map[string]any{
+			"available":             true,
+			"defaultBaudRate":       server.serial.DefaultBaudRate(),
+			"maxJobTranscriptBytes": server.config.MaxConsoleLogBytes,
+			"replayBytes":           server.serial.ReplayLimit(),
+			"ftdiVendorId":          serialconsole.FTDIVendorID,
+			"ftdiProductId":         serialconsole.FT2232HProductID,
+			"uartChannel":           serialconsole.FT2232HUARTChannel,
+		},
 		"authRequired": server.config.APIToken != "" && !isDirectLoopbackRequest(request),
 	})
 }
@@ -133,7 +166,25 @@ func (server *Server) xilinxTargets(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusBadRequest, "target_discovery_failed", err.Error())
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"targets": targets})
+	associated := make([]xilinxTargetResponse, 0, len(targets))
+	for _, target := range targets {
+		item := xilinxTargetResponse{Target: target, SerialAssociation: "not_found"}
+		if target.CableSerial != "" {
+			port, status, matchErr := server.serial.MatchCableSerial(ctx, target.CableSerial)
+			item.SerialAssociation = status
+			if matchErr == nil {
+				item.SerialPort = &port
+			}
+		}
+		associated = append(associated, item)
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"targets": associated})
+}
+
+type xilinxTargetResponse struct {
+	xsdb.Target
+	SerialAssociation string              `json:"serialAssociation"`
+	SerialPort        *serialconsole.Port `json:"serialPort,omitempty"`
 }
 
 func (server *Server) listArtifacts(response http.ResponseWriter, _ *http.Request) {

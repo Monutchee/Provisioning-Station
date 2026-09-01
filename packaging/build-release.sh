@@ -101,10 +101,12 @@ for arch in amd64 arm64; do
     root="${STAGING}/${package}"
     mkdir -p -- "${root}"
     build_binary linux "${arch}" "${root}/mnc-station"
-    install -m 0644 "${PROJECT_ROOT}/LICENSE" "${PROJECT_ROOT}/README.md" "${root}/"
+    install -m 0644 "${PROJECT_ROOT}/LICENSE" "${PROJECT_ROOT}/README.md" \
+        "${PROJECT_ROOT}/THIRD_PARTY_NOTICES.md" "${root}/"
     install -d -m 0755 "${root}/doc"
     install -m 0644 "${PROJECT_ROOT}/doc/README.md" \
-        "${PROJECT_ROOT}/doc/BUILDING.md" "${root}/doc/"
+        "${PROJECT_ROOT}/doc/BUILDING.md" \
+        "${PROJECT_ROOT}/doc/SERIAL_CONSOLE.md" "${root}/doc/"
     install -d -m 0755 "${root}/api"
     install -m 0644 "${PROJECT_ROOT}/api/openapi.yaml" "${root}/api/"
     install -d -m 0755 "${root}/completion"
@@ -121,10 +123,12 @@ package="mnc-station_${RELEASE_VERSION}_windows_amd64"
 root="${STAGING}/${package}"
 mkdir -p -- "${root}"
 build_binary windows amd64 "${root}/mnc-station.exe"
-install -m 0644 "${PROJECT_ROOT}/LICENSE" "${PROJECT_ROOT}/README.md" "${root}/"
+install -m 0644 "${PROJECT_ROOT}/LICENSE" "${PROJECT_ROOT}/README.md" \
+    "${PROJECT_ROOT}/THIRD_PARTY_NOTICES.md" "${root}/"
 install -d -m 0755 "${root}/doc"
 install -m 0644 "${PROJECT_ROOT}/doc/README.md" \
-    "${PROJECT_ROOT}/doc/BUILDING.md" "${root}/doc/"
+    "${PROJECT_ROOT}/doc/BUILDING.md" \
+    "${PROJECT_ROOT}/doc/SERIAL_CONSOLE.md" "${root}/doc/"
 install -d -m 0755 "${root}/api"
 install -m 0644 "${PROJECT_ROOT}/api/openapi.yaml" "${root}/api/"
 (

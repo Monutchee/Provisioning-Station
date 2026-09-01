@@ -13,13 +13,13 @@ connect to either a local or remote `hw_server`.
 Browser / mnc / future cloud controller
                   │ HTTP API v1
                   ▼
-        ┌─────────────────────┐
-        │ Local Station agent │
-        │ jobs + audit events │
-        └──────┬────────┬─────┘
-               │        │
-          XSDB │        │ read-only TFTP
-               ▼        ▼
+        ┌────────────────────────────┐
+        │ Local Station agent        │
+        │ jobs + audit + serial logs │
+        └──────┬─────────┬───────────┘
+               │         │           │
+          XSDB │    TFTP │      UART │
+               ▼         ▼           ▼
         Xilinx hw_server ───► target board
 ```
 
@@ -31,6 +31,8 @@ agent exposes the stable boundary they can call later.
 
 - [User guide](doc/README.md) — installation, configuration, browser operation,
   `mnc deploy`, authentication, and troubleshooting.
+- [Serial console API](doc/SERIAL_CONSOLE.md) — FTDI identity, live WebSocket
+  sessions, access leases, and per-job capture.
 - [Building guide](doc/BUILDING.md) — Linux and Windows builds, tests,
   cross-compilation, Debian packages, MSI creation, and release verification.
 
@@ -44,6 +46,8 @@ agent exposes the stable boundary they can call later.
 - Persistent, serialized hardware jobs with cancellation and audit events.
 - Xilinx target discovery and `xsdb` execution against
   `tcp:<host>:<port>` hardware-server URLs, including queued multi-board boots.
+- Stable pairing of each FT2232H JTAG cable with its channel B Linux tty or
+  Windows COM port, plus ANSI browser terminals and bounded RX-only job logs.
 - A per-job, read-only TFTP server with RFC 1350 reads and `blksize`, `timeout`,
   and `tsize` option negotiation.
 - Linux service/deb packaging, Windows MSI authoring, release archives, and
@@ -116,6 +120,8 @@ The most useful service flags and environment variables are:
 | `--data-dir` | `MNC_STATION_DATA_DIR` | platform user config directory |
 | `--xsdb-path` | `MNC_XSDB` | auto-detect |
 | `--api-token-file` | `MNC_STATION_TOKEN_FILE` | none |
+| `--serial-baud` | `MNC_STATION_SERIAL_BAUD` | `115200` |
+| `--max-console-log-bytes` | `MNC_STATION_MAX_CONSOLE_LOG_BYTES` | `16777216` |
 
 `MNC_STATION_TOKEN` can supply the token directly. Direct browser/API requests
 to an IP loopback URL such as `http://127.0.0.1:8042` or `http://[::1]:8042`
@@ -144,14 +150,19 @@ The API is rooted at `/api/v1`. Its OpenAPI description is
 
 1. `POST /api/v1/artifacts` with one multipart `artifact` file.
 2. `GET /api/v1/xilinx/targets?hwServerUrl=...` to discover PSU targets.
-3. `POST /api/v1/jobs` with the artifact ID, connection settings,
+3. Use the `serialPort` association returned for each target, or call
+   `GET /api/v1/serial/ports`. Live consoles use a short-lived session from
+   `POST /api/v1/serial/sessions` and its WebSocket path.
+4. `POST /api/v1/jobs` with the artifact ID, connection settings,
    `targetCableSerial`, `targetDeviceIndex`, and the diagnostic `targetId`.
-   Submit one job per target for a multi-board boot. The stable cable identity
-   is resolved inside the boot XSDB process because numeric IDs are
-   session-local.
-4. Poll `GET /api/v1/jobs/{id}` and `GET /api/v1/jobs/{id}/events`, or request
+   Include the matched `serialConsole` to start RX capture before XSDB. Submit
+   one job per target for a multi-board boot. The stable cable identity is
+   resolved inside the boot XSDB process because numeric IDs are session-local.
+5. Poll `GET /api/v1/jobs/{id}` and `GET /api/v1/jobs/{id}/events`, or request
    `text/event-stream` for events.
-5. `POST /api/v1/jobs/{id}/cancel` when cancellation is needed.
+6. Download captured bytes from
+   `GET /api/v1/jobs/{id}/serial-transcript`, or cancel with
+   `POST /api/v1/jobs/{id}/cancel`.
 
 `GET /api/v1/health` is intentionally public. Other endpoints require
 `Authorization: Bearer <token>` when authentication is configured, except for
@@ -184,4 +195,5 @@ Hardware tests are deliberately separate from unit tests. A successful MSAP1
 smoke test requires XSDB to finish, every file declared below the artifact's
 `tftpRoot` to be requested successfully, and Linux to boot on the board.
 
-Licensed under Apache-2.0.
+Licensed under Apache-2.0. Bundled dependency licenses are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

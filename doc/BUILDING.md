@@ -229,7 +229,9 @@ The package installs:
 
 The service runs as the dedicated `mnc-station` account and receives only
 `CAP_NET_BIND_SERVICE`, which is needed for TFTP port 69. Configure the XSDB
-path in `/etc/default/mnc-station` after installation.
+path in `/etc/default/mnc-station` after installation. The post-install script
+also adds that account to `dialout` when available so it can open FTDI tty
+devices.
 
 ## Build the Windows MSI
 
@@ -241,6 +243,9 @@ dotnet tool install --global wix --version 6.0.0
 $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
 wix --version
 ```
+
+The installed directory contains the application and third-party license
+notices alongside the executable.
 
 If WiX is already installed, use:
 
@@ -259,6 +264,7 @@ $Ldflags = "-s -w -X main.version=$Version -X main.commit=$Commit -X main.buildD
 New-Item -ItemType Directory -Force release\input | Out-Null
 go build -trimpath -ldflags $Ldflags `
     -o release\input\mnc-station.exe .\cmd\mnc-station
+Copy-Item -Path LICENSE, THIRD_PARTY_NOTICES.md -Destination release\input\
 
 $SourceDir = (Resolve-Path release\input).Path
 wix build -arch x64 `
