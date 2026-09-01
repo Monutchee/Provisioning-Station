@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
+	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
 )
 
 type Runner interface {
@@ -26,10 +27,32 @@ type Runner interface {
 	Run(context.Context, artifact.StoredArtifact, Request, func(level, message string)) error
 }
 
+type ConsoleService interface {
+	Attach(context.Context, serialconsole.AttachRequest) (*serialconsole.Attachment, error)
+}
+
+type ManagerOption func(*Manager) error
+
+func WithSerialConsole(service ConsoleService, maxLogBytes int64) ManagerOption {
+	return func(manager *Manager) error {
+		if service == nil {
+			return fmt.Errorf("serial console service must not be nil")
+		}
+		if maxLogBytes <= 0 {
+			return fmt.Errorf("serial console log limit must be positive")
+		}
+		manager.console = service
+		manager.maxConsoleLogBytes = maxLogBytes
+		return nil
+	}
+}
+
 type Manager struct {
-	root      string
-	artifacts *artifact.Store
-	runner    Runner
+	root               string
+	artifacts          *artifact.Store
+	runner             Runner
+	console            ConsoleService
+	maxConsoleLogBytes int64
 
 	context context.Context
 	cancel  context.CancelFunc
@@ -43,7 +66,7 @@ type Manager struct {
 	cancellers  map[string]context.CancelFunc
 }
 
-func OpenManager(root string, artifacts *artifact.Store, runner Runner) (*Manager, error) {
+func OpenManager(root string, artifacts *artifact.Store, runner Runner, options ...ManagerOption) (*Manager, error) {
 	if artifacts == nil || runner == nil {
 		return nil, fmt.Errorf("job manager requires an artifact store and runner")
 	}
@@ -66,6 +89,15 @@ func OpenManager(root string, artifacts *artifact.Store, runner Runner) (*Manage
 		events:      make(map[string][]Event),
 		subscribers: make(map[string]map[chan Event]struct{}),
 		cancellers:  make(map[string]context.CancelFunc),
+	}
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		if err := option(manager); err != nil {
+			cancel()
+			return nil, err
+		}
 	}
 	if err := manager.load(); err != nil {
 		cancel()
@@ -91,8 +123,22 @@ func (manager *Manager) Create(request Request) (Job, error) {
 }
 
 func (manager *Manager) CreateContext(ctx context.Context, request Request) (Job, error) {
+	request = cloneRequest(request)
 	if request.ArtifactID == "" {
 		return Job{}, fmt.Errorf("artifactId must not be empty")
+	}
+	if request.SerialConsole != nil {
+		if manager.console == nil {
+			return Job{}, fmt.Errorf("serial console capture is unavailable")
+		}
+		if request.SerialConsole.PortID == "" {
+			return Job{}, fmt.Errorf("serialConsole.portId must not be empty")
+		}
+		if request.SerialConsole.BaudRate != 0 {
+			if err := serialconsole.ValidateBaudRate(request.SerialConsole.BaudRate); err != nil {
+				return Job{}, err
+			}
+		}
 	}
 	stored, err := manager.artifacts.Load(request.ArtifactID)
 	if err != nil {
@@ -128,7 +174,7 @@ func (manager *Manager) CreateContext(ctx context.Context, request Request) (Job
 		manager.mutex.Unlock()
 		return Job{}, err
 	}
-	result := *job
+	result := cloneJob(job)
 	manager.mutex.Unlock()
 
 	select {
@@ -146,7 +192,7 @@ func (manager *Manager) Get(id string) (Job, error) {
 	if !ok {
 		return Job{}, fmt.Errorf("job %s was not found", id)
 	}
-	return *job, nil
+	return cloneJob(job), nil
 }
 
 func (manager *Manager) List() []Job {
@@ -154,7 +200,7 @@ func (manager *Manager) List() []Job {
 	defer manager.mutex.RUnlock()
 	result := make([]Job, 0, len(manager.jobs))
 	for _, job := range manager.jobs {
-		result = append(result, *job)
+		result = append(result, cloneJob(job))
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedUTC.After(result[j].CreatedUTC) })
 	return result
@@ -168,7 +214,7 @@ func (manager *Manager) Cancel(id string) (Job, error) {
 		return Job{}, fmt.Errorf("job %s was not found", id)
 	}
 	if job.State.Terminal() {
-		return *job, nil
+		return cloneJob(job), nil
 	}
 	if cancel := manager.cancellers[id]; cancel != nil {
 		cancel()
@@ -179,7 +225,7 @@ func (manager *Manager) Cancel(id string) (Job, error) {
 		manager.emitLocked(job, "warning", "Job canceled before execution")
 		_ = manager.persistLocked(job)
 	}
-	return *job, nil
+	return cloneJob(job), nil
 }
 
 func (manager *Manager) Events(id string, after int) ([]Event, error) {
@@ -272,9 +318,47 @@ func (manager *Manager) run(id string) {
 	} else if verifyErr := manager.artifacts.Verify(runContext, stored); verifyErr != nil {
 		runErr = verifyErr
 	} else {
-		runErr = manager.runner.Run(runContext, stored, request, func(level, message string) {
-			manager.emit(id, level, message)
-		})
+		var capture *activeSerialCapture
+		capture, runErr = manager.startSerialCapture(runContext, id, request.SerialConsole)
+		if runErr == nil && capture != nil {
+			manager.mutex.Lock()
+			metadata := capture.Snapshot()
+			manager.jobs[id].SerialCapture = &metadata
+			manager.emitLocked(manager.jobs[id], "info", fmt.Sprintf("Serial console capture started at %d baud", capture.attachment.BaudRate()))
+			_ = manager.persistLocked(manager.jobs[id])
+			manager.mutex.Unlock()
+		}
+		if runErr == nil {
+			executionContext, stopExecution := context.WithCancel(runContext)
+			runnerDone := make(chan error, 1)
+			go func() {
+				runnerDone <- manager.runner.Run(executionContext, stored, request, func(level, message string) {
+					manager.emit(id, level, message)
+				})
+			}()
+			if capture == nil {
+				runErr = <-runnerDone
+			} else {
+				select {
+				case runErr = <-runnerDone:
+				case captureErr := <-capture.Failure():
+					stopExecution()
+					<-runnerDone
+					runErr = captureErr
+				}
+			}
+			stopExecution()
+		}
+		if capture != nil {
+			metadata, stopErr := capture.Stop(runErr != nil)
+			manager.mutex.Lock()
+			manager.jobs[id].SerialCapture = &metadata
+			_ = manager.persistLocked(manager.jobs[id])
+			manager.mutex.Unlock()
+			if runErr == nil && stopErr != nil {
+				runErr = fmt.Errorf("serial console capture: %w", stopErr)
+			}
+		}
 	}
 	cancel()
 
@@ -366,6 +450,16 @@ func (manager *Manager) load() error {
 			job.State = StateFailed
 			job.FinishedUTC = &now
 			job.Error = "station stopped before the job completed"
+			if job.SerialCapture != nil && job.SerialCapture.State == "capturing" {
+				job.SerialCapture.State = "failed"
+				job.SerialCapture.FinishedUTC = &now
+				if info, statErr := os.Stat(filepath.Join(manager.root, id, serialTranscriptName)); statErr == nil {
+					job.SerialCapture.RetainedBytes = info.Size()
+					if job.SerialCapture.ReceivedBytes < info.Size() {
+						job.SerialCapture.ReceivedBytes = info.Size()
+					}
+				}
+			}
 			manager.emitLocked(&job, "error", job.Error)
 			_ = manager.persistLocked(&job)
 		}

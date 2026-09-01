@@ -10,3 +10,7 @@
 # A non-loopback listener automatically creates
 # /var/lib/mnc-station/api-token. Set this to use a managed token instead.
 # MNC_STATION_TOKEN_FILE=/etc/mnc-station/token
+
+# FT2232H channel B defaults to 115200 8N1. Job transcripts retain 16 MiB.
+# MNC_STATION_SERIAL_BAUD=115200
+# MNC_STATION_MAX_CONSOLE_LOG_BYTES=16777216

@@ -11,17 +11,23 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
 	"github.com/Monutchee/Provisioning-Station/internal/jobs"
+	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
+	"github.com/coder/websocket"
 )
 
 type testResolver struct {
@@ -41,6 +47,65 @@ type immediateRunner struct{}
 func (immediateRunner) Validate(artifact.StoredArtifact, jobs.Request) error { return nil }
 func (immediateRunner) Run(_ context.Context, _ artifact.StoredArtifact, _ jobs.Request, emit func(string, string)) error {
 	emit("info", "test runner completed")
+	return nil
+}
+
+type testSerialService struct{ port serialconsole.Port }
+
+func (service testSerialService) List(context.Context) (serialconsole.Discovery, error) {
+	return serialconsole.Discovery{Ports: []serialconsole.Port{service.port}}, nil
+}
+
+func (service testSerialService) MatchCableSerial(_ context.Context, serialNumber string) (serialconsole.Port, string, error) {
+	if service.port.USBSerial == serialNumber {
+		return service.port, "matched", nil
+	}
+	return serialconsole.Port{}, "not_found", serialconsole.ErrPortNotFound
+}
+
+func (testSerialService) Attach(context.Context, serialconsole.AttachRequest) (*serialconsole.Attachment, error) {
+	return nil, errors.New("serial attachment is not configured in this test")
+}
+
+func (testSerialService) DefaultBaudRate() int { return serialconsole.DefaultBaudRate }
+func (testSerialService) ReplayLimit() int     { return serialconsole.DefaultReplayBytes }
+
+type httpSerialDiscoverer struct{ port serialconsole.Port }
+
+func (discoverer httpSerialDiscoverer) Discover(context.Context) (serialconsole.Discovery, error) {
+	return serialconsole.Discovery{Ports: []serialconsole.Port{discoverer.port}}, nil
+}
+
+type httpSerialPort struct {
+	reads  chan []byte
+	closed chan struct{}
+	once   sync.Once
+	mutex  sync.Mutex
+	writes []byte
+}
+
+func newHTTPSerialPort() *httpSerialPort {
+	return &httpSerialPort{reads: make(chan []byte, 8), closed: make(chan struct{})}
+}
+
+func (port *httpSerialPort) Read(destination []byte) (int, error) {
+	select {
+	case data := <-port.reads:
+		return copy(destination, data), nil
+	case <-port.closed:
+		return 0, io.EOF
+	}
+}
+
+func (port *httpSerialPort) Write(data []byte) (int, error) {
+	port.mutex.Lock()
+	defer port.mutex.Unlock()
+	port.writes = append(port.writes, data...)
+	return len(data), nil
+}
+
+func (port *httpSerialPort) Close() error {
+	port.once.Do(func() { close(port.closed) })
 	return nil
 }
 
@@ -67,6 +132,11 @@ func newTestServices(t *testing.T, token string) testServices {
 			ID: "3", Name: "PSU", DeviceIndex: "0", DeviceName: "xczu4ev",
 			CableName: "Digilent USB Device", CableSerial: "210308A12345",
 		}}},
+		Serial: testSerialService{port: serialconsole.Port{
+			ID: strings.Repeat("a", 64), Name: "/dev/ttyUSB1",
+			VendorID: serialconsole.FTDIVendorID, ProductID: serialconsole.FT2232HProductID,
+			USBSerial: "210308A12345", Channel: serialconsole.FT2232HUARTChannel,
+		}},
 	}, store, manager)
 	if err != nil {
 		t.Fatal(err)
@@ -141,8 +211,142 @@ func TestDiscoverXilinxTargets(t *testing.T) {
 	response := httptest.NewRecorder()
 	services.handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK ||
-		!strings.Contains(response.Body.String(), `"cableSerial":"210308A12345"`) {
+		!strings.Contains(response.Body.String(), `"cableSerial":"210308A12345"`) ||
+		!strings.Contains(response.Body.String(), `"serialAssociation":"matched"`) ||
+		!strings.Contains(response.Body.String(), `"name":"/dev/ttyUSB1"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+}
+
+func TestSerialSessionStreamsAndEnforcesControllerLease(t *testing.T) {
+	store, err := artifact.OpenStore(filepath.Join(t.TempDir(), "store"), artifact.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobManager, err := jobs.OpenManager(filepath.Join(t.TempDir(), "jobs"), store, immediateRunner{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer jobManager.Close()
+	port := serialconsole.Port{
+		ID: "serial-port-a", Name: "/dev/ttyUSB1", VendorID: serialconsole.FTDIVendorID,
+		ProductID: serialconsole.FT2232HProductID, USBSerial: "BOARD-A", Channel: serialconsole.FT2232HUARTChannel,
+	}
+	handle := newHTTPSerialPort()
+	console, err := serialconsole.New(serialconsole.Config{
+		Discoverer: httpSerialDiscoverer{port: port},
+		Open:       func(string, int) (serialconsole.PortHandle, error) { return handle, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer console.Close()
+	apiServer, err := New(Config{XSDB: testResolver{path: "xsdb"}, Serial: console}, store, jobManager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(apiServer.Handler())
+	defer httpServer.Close()
+
+	create := func(access string) (*http.Response, map[string]any) {
+		t.Helper()
+		body := fmt.Sprintf(`{"portId":%q,"baudRate":115200,"access":%q}`, port.ID, access)
+		response, requestErr := http.Post(httpServer.URL+"/api/v1/serial/sessions", "application/json", strings.NewReader(body))
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		var payload map[string]any
+		if strings.Contains(response.Header.Get("Content-Type"), "application/json") {
+			if decodeErr := json.NewDecoder(response.Body).Decode(&payload); decodeErr != nil {
+				response.Body.Close()
+				t.Fatal(decodeErr)
+			}
+		}
+		response.Body.Close()
+		return response, payload
+	}
+
+	createdResponse, session := create("controller")
+	if createdResponse.StatusCode != http.StatusCreated || createdResponse.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("create controller status = %d, body = %v", createdResponse.StatusCode, session)
+	}
+	conflictResponse, conflict := create("controller")
+	if conflictResponse.StatusCode != http.StatusConflict {
+		t.Fatalf("second controller status = %d, body = %v", conflictResponse.StatusCode, conflict)
+	}
+	observerResponse, observer := create("observer")
+	if observerResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("create observer status = %d, body = %v", observerResponse.StatusCode, observer)
+	}
+	observerID := observer["id"].(string)
+	deleteRequest, err := http.NewRequest(http.MethodDelete, httpServer.URL+"/api/v1/serial/sessions/"+observerID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteResponse, err := http.DefaultClient.Do(deleteRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteResponse.Body.Close()
+	if deleteResponse.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete observer status = %d", deleteResponse.StatusCode)
+	}
+
+	streamPath := session["websocketPath"].(string)
+	websocketURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + streamPath
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	badConnection, badResponse, badErr := websocket.Dial(ctx, websocketURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{"https://malicious.example"}},
+	})
+	if badConnection != nil {
+		badConnection.CloseNow()
+	}
+	if badResponse != nil && badResponse.Body != nil {
+		badResponse.Body.Close()
+	}
+	if badErr == nil || badResponse == nil || badResponse.StatusCode != http.StatusForbidden {
+		t.Fatalf("cross-origin dial error=%v response=%v", badErr, badResponse)
+	}
+	connection, _, err := websocket.Dial(ctx, websocketURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.CloseNow()
+	auth, _ := json.Marshal(map[string]string{"type": "attach", "token": session["attachToken"].(string)})
+	if err := connection.Write(ctx, websocket.MessageText, auth); err != nil {
+		t.Fatal(err)
+	}
+	messageType, ready, err := connection.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != websocket.MessageText || !bytes.Contains(ready, []byte(`"type":"ready"`)) {
+		t.Fatalf("ready message = type %v, %s", messageType, ready)
+	}
+	if err := connection.Write(ctx, websocket.MessageBinary, []byte("help\r")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		handle.mutex.Lock()
+		written := string(handle.writes)
+		handle.mutex.Unlock()
+		if written == "help\r" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("serial writes = %q", written)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	handle.reads <- []byte("booting\r\n")
+	messageType, output, err := connection.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != websocket.MessageBinary || string(output) != "booting\r\n" {
+		t.Fatalf("serial output = type %v, %q", messageType, output)
 	}
 }
 
