@@ -198,9 +198,19 @@ func TestJobCapturesSerialBeforeRunnerAndTruncatesRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer manager.Close()
+	if _, err := manager.Create(Request{
+		ArtifactID: stored.ID,
+		SerialConsole: &SerialConsoleRequest{
+			PortID: serialPort.ID, Selection: SerialSelection("automatic"),
+		},
+	}); err == nil || !strings.Contains(err.Error(), "serialConsole.selection") {
+		t.Fatalf("invalid serial selection error = %v", err)
+	}
 	job, err := manager.Create(Request{
-		ArtifactID:    stored.ID,
-		SerialConsole: &SerialConsoleRequest{PortID: serialPort.ID, BaudRate: 115200},
+		ArtifactID: stored.ID,
+		SerialConsole: &SerialConsoleRequest{
+			PortID: serialPort.ID, BaudRate: 115200, Selection: SerialSelectionManual,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -240,6 +250,19 @@ func TestJobCapturesSerialBeforeRunnerAndTruncatesRetention(t *testing.T) {
 		finished.SerialCapture.ReceivedBytes != 6 || finished.SerialCapture.RetainedBytes != 4 ||
 		finished.SerialCapture.State != "truncated" {
 		t.Fatalf("serial capture = %+v", finished.SerialCapture)
+	}
+	events, err := manager.Events(job.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundManualWarning := false
+	for _, event := range events {
+		if event.Level == "warning" && strings.Contains(event.Message, "selected manually") {
+			foundManualWarning = true
+		}
+	}
+	if !foundManualWarning {
+		t.Fatalf("manual serial warning missing from events: %+v", events)
 	}
 }
 

@@ -134,6 +134,11 @@ func (manager *Manager) CreateContext(ctx context.Context, request Request) (Job
 		if request.SerialConsole.PortID == "" {
 			return Job{}, fmt.Errorf("serialConsole.portId must not be empty")
 		}
+		switch request.SerialConsole.Selection {
+		case "", SerialSelectionMatched, SerialSelectionManual:
+		default:
+			return Job{}, fmt.Errorf("serialConsole.selection must be %q or %q", SerialSelectionMatched, SerialSelectionManual)
+		}
 		if request.SerialConsole.BaudRate != 0 {
 			if err := serialconsole.ValidateBaudRate(request.SerialConsole.BaudRate); err != nil {
 				return Job{}, err
@@ -318,6 +323,9 @@ func (manager *Manager) run(id string) {
 	} else if verifyErr := manager.artifacts.Verify(runContext, stored); verifyErr != nil {
 		runErr = verifyErr
 	} else {
+		if request.SerialConsole != nil && request.SerialConsole.Selection == SerialSelectionManual {
+			manager.emit(id, "warning", "Serial console was selected manually; JTAG-to-UART identity was not verified")
+		}
 		var capture *activeSerialCapture
 		capture, runErr = manager.startSerialCapture(runContext, id, request.SerialConsole)
 		if runErr == nil && capture != nil {

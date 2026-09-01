@@ -124,6 +124,30 @@ func TestManagerSharesPortWithObserversAndOneController(t *testing.T) {
 	}
 }
 
+func TestManagerMatchesOnlyUniqueFTDIChannelBPorts(t *testing.T) {
+	discovery := normalizeCandidates([]candidate{
+		{Name: "COM3", VendorID: FTDIVendorID, ProductID: FT2232HProductID, USBSerial: "BOARD-A", Channel: "B"},
+		{Name: "COM4", VendorID: FTDIVendorID, ProductID: FT2232HProductID, USBSerial: "BOARD-B", Channel: "B"},
+		{Name: "COM5", VendorID: FTDIVendorID, ProductID: FT2232HProductID, USBSerial: "BOARD-B", Channel: "B"},
+		{Name: "COM6", USBSerial: "BOARD-C"},
+	})
+	manager, err := New(Config{Discoverer: staticDiscoverer{result: discovery}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Close)
+	port, status, err := manager.MatchCableSerial(context.Background(), "BOARD-A")
+	if err != nil || status != "matched" || port.Name != "COM3" {
+		t.Fatalf("BOARD-A match = %+v, %q, %v", port, status, err)
+	}
+	if _, status, err := manager.MatchCableSerial(context.Background(), "BOARD-B"); !errors.Is(err, ErrPortAmbiguous) || status != "ambiguous" {
+		t.Fatalf("BOARD-B match status=%q error=%v", status, err)
+	}
+	if _, status, err := manager.MatchCableSerial(context.Background(), "BOARD-C"); !errors.Is(err, ErrPortNotFound) || status != "not_found" {
+		t.Fatalf("BOARD-C match status=%q error=%v", status, err)
+	}
+}
+
 func TestManagerReplaysRecentDataAndRejectsModeConflict(t *testing.T) {
 	manager, port, handle := testManager(t)
 	first, err := manager.Attach(context.Background(), AttachRequest{PortID: port.ID, BaudRate: 115200})
