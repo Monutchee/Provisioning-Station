@@ -73,12 +73,19 @@
           <span class="badge" id="artifact-count">0 artifacts</span>
         </div>
 
-        <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-controls="artifact-file">
+        <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-controls="artifact-file" aria-describedby="upload-status">
           <input id="artifact-file" type="file" accept=".gz,.tgz,application/gzip" class="sr-only">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5h14v-5"/></svg>
           <strong>Drop a Station artifact here</strong>
           <span>or select an <code>*.tar.gz</code> file</span>
           <div class="upload-progress hidden" id="upload-progress"><span></span></div>
+          <div class="upload-status hidden" id="upload-status" role="status" aria-live="polite" aria-atomic="true">
+            <span class="upload-status-icon" id="upload-status-icon" aria-hidden="true"></span>
+            <span class="upload-status-copy">
+              <strong id="upload-status-title"></strong>
+              <span id="upload-status-message"></span>
+            </span>
+          </div>
         </div>
 
         <label class="field">

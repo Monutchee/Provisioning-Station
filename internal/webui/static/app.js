@@ -31,6 +31,7 @@ const state = {
 const elements = Object.fromEntries([
   "agent-state", "agent-version", "xsdb-state", "tftp-listen", "serial-state", "auth-notice",
   "token-form", "api-token", "drop-zone", "artifact-file", "upload-progress",
+  "upload-status", "upload-status-icon", "upload-status-title", "upload-status-message",
   "artifact-select", "artifact-count", "artifact-card", "artifact-vendor",
   "artifact-name", "artifact-details", "artifact-sha", "artifact-built",
   "boot-form", "hw-server-url", "discover-targets", "target-list",
@@ -331,7 +332,7 @@ function updateStartButton() {
 async function uploadArtifact(file) {
   if (!file || state.uploadingArtifact) return;
   state.uploadingArtifact = true;
-  showFormError("");
+  showArtifactUploadStatus("progress", "Uploading and verifying", file.name);
   elements["upload-progress"].classList.remove("hidden");
   elements["artifact-file"].disabled = true;
   elements["drop-zone"].setAttribute("aria-busy", "true");
@@ -341,9 +342,13 @@ async function uploadArtifact(file) {
     const imported = await api("/api/v1/artifacts", { method: "POST", body: form });
     state.selectedArtifact = imported.id;
     await loadArtifacts();
-    showToast(`${imported.manifest.artifact.name} verified and imported`);
+    showArtifactUploadStatus(
+      "success",
+      "Upload and verification complete",
+      `${file.name} was verified and imported as ${imported.manifest.artifact.name}.`,
+    );
   } catch (error) {
-    showFormError(artifactUploadError(error, file));
+    showArtifactUploadStatus("error", "Artifact upload failed", artifactUploadError(error, file));
   } finally {
     state.uploadingArtifact = false;
     elements["upload-progress"].classList.add("hidden");
@@ -358,6 +363,18 @@ function artifactUploadError(error, file) {
     return `${file.name} ended early during verification. Wait for the artifact export to finish, then select the file again.`;
   }
   return error.message;
+}
+
+function showArtifactUploadStatus(kind, title, message) {
+  const visible = Boolean(kind);
+  const status = elements["upload-status"];
+  status.className = visible ? `upload-status ${kind}` : "upload-status hidden";
+  status.setAttribute("aria-live", kind === "error" ? "assertive" : "polite");
+  elements["upload-status-icon"].textContent = { progress: "…", success: "✓", error: "!" }[kind] || "";
+  elements["upload-status-title"].textContent = title || "";
+  elements["upload-status-message"].textContent = message || "";
+  elements["drop-zone"].classList.toggle("upload-success", kind === "success");
+  elements["drop-zone"].classList.toggle("upload-error", kind === "error");
 }
 
 async function loadJobs(selectNewest = false) {
