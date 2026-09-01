@@ -54,6 +54,45 @@ func TestHandlerEmbedsOptionalManualSerialSelection(t *testing.T) {
 	}
 }
 
+func TestHandlerEmbedsArtifactUploadFeedbackInDropZone(t *testing.T) {
+	for _, test := range []struct {
+		path     string
+		expected []string
+	}{
+		{
+			path: "/",
+			expected: []string{
+				`id="drop-zone"`,
+				`id="upload-status"`,
+				`aria-describedby="upload-status"`,
+			},
+		},
+		{
+			path: "/app.js",
+			expected: []string{
+				`Upload and verification complete`,
+				`showArtifactUploadStatus("error"`,
+			},
+		},
+	} {
+		request := httptest.NewRequest(http.MethodGet, test.path, nil)
+		response := httptest.NewRecorder()
+		Handler().ServeHTTP(response, request)
+		for _, expected := range test.expected {
+			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), expected) {
+				t.Errorf("GET %s: status=%d expected content %q", test.path, response.Code, expected)
+			}
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	response := httptest.NewRecorder()
+	Handler().ServeHTTP(response, request)
+	if strings.Contains(response.Body.String(), `showFormError(artifactUploadError`) {
+		t.Error("artifact upload errors are still rendered in the boot form")
+	}
+}
+
 func TestHandlerCSPAllowsXtermDynamicStylesButNotInlineScripts(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	response := httptest.NewRecorder()

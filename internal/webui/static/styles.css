@@ -108,12 +108,30 @@ main { max-width: 1440px; margin: 0 auto; padding: 48px 24px 72px; }
 }
 .drop-zone:hover, .drop-zone:focus-visible, .drop-zone.dragging { border-color: var(--green-bright); background: var(--green-soft); transform: translateY(-1px); }
 .drop-zone[aria-busy="true"] { pointer-events: none; cursor: wait; opacity: .72; transform: none; }
+.drop-zone.upload-success { border-color: var(--green-bright); background: var(--green-soft); }
+.drop-zone.upload-error { border-color: var(--red); background: #fff4f3; }
 .drop-zone svg { width: 28px; height: 28px; margin-bottom: 10px; fill: none; stroke: var(--green); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .drop-zone strong { font-size: 14px; }
 .drop-zone > span { margin-top: 5px; color: var(--muted); font-size: 12px; }
 .drop-zone code, small code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--green); }
 .upload-progress { width: min(280px, 80%); height: 4px; margin-top: 17px; overflow: hidden; border-radius: 4px; background: var(--line); }
 .upload-progress span { display: block; width: 38%; height: 100%; border-radius: inherit; background: var(--green-bright); animation: upload 1s ease-in-out infinite alternate; }
+.upload-status {
+  width: min(520px, 100%); margin-top: 16px; padding-top: 14px;
+  display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 9px;
+  border-top: 1px solid var(--line); text-align: left;
+}
+.upload-status-icon {
+  width: 22px; height: 22px; display: grid; place-items: center;
+  border-radius: 50%; color: white; background: var(--muted); font-size: 13px; font-weight: 800;
+}
+.upload-status-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.upload-status-copy strong { font-size: 12px; }
+.upload-status-copy > span { color: var(--muted); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.upload-status.success .upload-status-icon { background: var(--green-bright); }
+.upload-status.success .upload-status-copy strong { color: var(--green); }
+.upload-status.error .upload-status-icon { background: var(--red); }
+.upload-status.error .upload-status-copy strong, .upload-status.error .upload-status-copy > span { color: var(--red); }
 @keyframes upload { to { transform: translateX(165%); } }
 
 .field { display: flex; flex-direction: column; gap: 7px; }
@@ -278,6 +296,9 @@ input:focus, select:focus { border-color: var(--green-bright); box-shadow: 0 0 0
   .brand-mark { color: #112219; background: var(--green); }
   .notice { color: #f2d28d; border-color: #65522a; background: #302817; }
   .button.secondary { color: #241a07; background: #e8bf68; }
+  .drop-zone.upload-error { border-color: #d66d68; background: #2d201e; }
+  .upload-status.error .upload-status-icon { background: #c95650; }
+  .upload-status.error .upload-status-copy strong, .upload-status.error .upload-status-copy > span { color: #f08b85; }
   .artifact-card { background: linear-gradient(100deg, var(--green-soft), var(--surface-soft)); }
   .form-error { background: #3b2221; }
   .job-state.failed, .job-state.canceled { background: #3b2221; }
