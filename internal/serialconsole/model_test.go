@@ -12,14 +12,41 @@ func TestNormalizeCandidatesRequiresUniqueSerial(t *testing.T) {
 		{Name: "/dev/ttyUSB3", VendorID: FTDIVendorID, ProductID: FT2232HProductID, USBSerial: "BOARD-B", Channel: "B"},
 		{Name: "/dev/ttyUSB4", VendorID: FTDIVendorID, ProductID: FT2232HProductID, Channel: "B"},
 	})
-	if len(result.Ports) != 1 || result.Ports[0].USBSerial != "BOARD-A" {
+	if len(result.Ports) != 4 {
 		t.Fatalf("ports = %+v", result.Ports)
 	}
 	if len(result.Warnings) != 3 {
 		t.Fatalf("warnings = %+v", result.Warnings)
 	}
-	if result.Ports[0].ID == "" || result.Ports[0].Name != "/dev/ttyUSB1" {
-		t.Fatalf("port = %+v", result.Ports[0])
+	ids := make(map[string]struct{})
+	for _, port := range result.Ports {
+		if port.ID == "" {
+			t.Fatalf("port has no ID: %+v", port)
+		}
+		ids[port.ID] = struct{}{}
+	}
+	if len(ids) != len(result.Ports) {
+		t.Fatalf("manual fallback IDs are not unique: %+v", result.Ports)
+	}
+	matched := newPort(candidate{
+		Name: "/dev/ttyUSB1", VendorID: FTDIVendorID, ProductID: FT2232HProductID,
+		USBSerial: "BOARD-A", Channel: "B",
+	})
+	if result.Ports[0].ID != matched.ID {
+		t.Fatalf("safe automatic ID changed: got %s want %s", result.Ports[0].ID, matched.ID)
+	}
+}
+
+func TestNormalizeCandidatesListsGenericAndUnidentifiedPortsForManualSelection(t *testing.T) {
+	result := normalizeCandidates([]candidate{
+		{Name: "COM3"},
+		{Name: "COM7", VendorID: FTDIVendorID, ProductID: FT2232HProductID, USBSerial: "BOARD-A"},
+	})
+	if len(result.Ports) != 2 || result.Ports[0].Name != "COM3" || result.Ports[1].Name != "COM7" {
+		t.Fatalf("ports = %+v", result.Ports)
+	}
+	if result.Ports[0].ID == result.Ports[1].ID || len(result.Warnings) != 0 {
+		t.Fatalf("discovery = %+v", result)
 	}
 }
 

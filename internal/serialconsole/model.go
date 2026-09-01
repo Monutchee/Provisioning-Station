@@ -32,10 +32,10 @@ var (
 type Port struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
-	VendorID       string `json:"vendorId"`
-	ProductID      string `json:"productId"`
-	USBSerial      string `json:"usbSerial"`
-	Channel        string `json:"channel"`
+	VendorID       string `json:"vendorId,omitempty"`
+	ProductID      string `json:"productId,omitempty"`
+	USBSerial      string `json:"usbSerial,omitempty"`
+	Channel        string `json:"channel,omitempty"`
 	Busy           bool   `json:"busy"`
 	HasController  bool   `json:"hasController"`
 	ActiveBaudRate int    `json:"activeBaudRate,omitempty"`
@@ -64,6 +64,15 @@ func newPort(value candidate) Port {
 	identity := strings.Join([]string{
 		"mnc-serial-console-v1", value.VendorID, value.ProductID, value.USBSerial, value.Channel,
 	}, "\x00")
+	return portFromIdentity(value, identity)
+}
+
+func newManualPort(value candidate) Port {
+	identity := strings.Join([]string{"mnc-serial-console-manual-v1", value.Name}, "\x00")
+	return portFromIdentity(value, identity)
+}
+
+func portFromIdentity(value candidate, identity string) Port {
 	digest := sha256.Sum256([]byte(identity))
 	return Port{
 		ID:        hex.EncodeToString(digest[:]),
@@ -78,27 +87,51 @@ func newPort(value candidate) Port {
 func normalizeCandidates(values []candidate) Discovery {
 	counts := make(map[string]int)
 	for _, value := range values {
-		if value.USBSerial != "" {
+		if automaticCandidate(value) && value.USBSerial != "" {
 			counts[value.USBSerial]++
 		}
 	}
 	result := Discovery{Ports: make([]Port, 0, len(values)), Warnings: make([]Warning, 0)}
+	seenNames := make(map[string]struct{})
 	for _, value := range values {
+		if value.Name == "" {
+			continue
+		}
+		if _, exists := seenNames[value.Name]; exists {
+			continue
+		}
+		seenNames[value.Name] = struct{}{}
+		matchable := automaticCandidate(value)
 		switch {
-		case value.USBSerial == "":
+		case matchable && value.USBSerial == "":
 			result.Warnings = append(result.Warnings, Warning{
-				Code: "serial_missing", Message: fmt.Sprintf("%s has no FTDI EEPROM serial and cannot be identified safely", value.Name),
+				Code: "serial_missing", Message: fmt.Sprintf("%s has no FTDI EEPROM serial and can only be selected manually", value.Name),
 			})
-		case counts[value.USBSerial] != 1:
+		case matchable && counts[value.USBSerial] != 1:
 			result.Warnings = append(result.Warnings, Warning{
 				Code: "serial_duplicate", USBSerial: value.USBSerial,
-				Message: fmt.Sprintf("FTDI serial %q is present more than once and cannot be associated safely", value.USBSerial),
+				Message: fmt.Sprintf("FTDI serial %q is present more than once and can only be selected manually", value.USBSerial),
 			})
-		default:
+		case matchable:
 			result.Ports = append(result.Ports, newPort(value))
+			continue
 		}
+		result.Ports = append(result.Ports, newManualPort(value))
 	}
 	return result
+}
+
+func automaticCandidate(value candidate) bool {
+	return strings.EqualFold(value.VendorID, FTDIVendorID) &&
+		strings.EqualFold(value.ProductID, FT2232HProductID) &&
+		strings.EqualFold(value.Channel, FT2232HUARTChannel)
+}
+
+func automaticallyMatchable(port Port) bool {
+	return automaticCandidate(candidate{
+		VendorID: port.VendorID, ProductID: port.ProductID,
+		USBSerial: port.USBSerial, Channel: port.Channel,
+	}) && port.USBSerial != ""
 }
 
 func ValidateBaudRate(value int) error {

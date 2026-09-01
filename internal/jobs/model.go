@@ -30,9 +30,17 @@ type Request struct {
 	SerialConsole     *SerialConsoleRequest `json:"serialConsole,omitempty"`
 }
 
+type SerialSelection string
+
+const (
+	SerialSelectionMatched SerialSelection = "matched"
+	SerialSelectionManual  SerialSelection = "manual"
+)
+
 type SerialConsoleRequest struct {
-	PortID   string `json:"portId"`
-	BaudRate int    `json:"baudRate,omitempty"`
+	PortID    string          `json:"portId"`
+	BaudRate  int             `json:"baudRate,omitempty"`
+	Selection SerialSelection `json:"selection,omitempty"`
 }
 
 type SerialCapture struct {

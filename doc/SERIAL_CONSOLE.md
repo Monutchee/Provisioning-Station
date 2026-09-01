@@ -1,19 +1,22 @@
 # Serial console API
 
-Provisioning Station exposes the UART half of supported FTDI adapters through
-HTTP API v1. The browser uses this API; future cloud software can use the same
-boundary without accessing a host TTY or COM port directly.
+Provisioning Station exposes locally enumerated Linux tty and Windows COM
+ports through HTTP API v1. The browser uses this API; future cloud software can
+use the same boundary without accessing a host serial device directly.
 
 ## Supported hardware and identity
 
-The native discovery backend currently accepts FT2232H devices with USB
-VID:PID `0403:6010`. Channel A remains owned by JTAG and channel B is exposed as
-the UART. The adapter must have a non-empty, unique EEPROM serial number.
+The native discovery backend lists every serial port reported by the operating
+system. It automatically associates JTAG and UART only for FT2232H devices with
+USB VID:PID `0403:6010`, a channel B interface, and a non-empty, unique EEPROM
+serial number. Channel A remains owned by JTAG.
 
-Linux reports the UART as a device such as `/dev/ttyUSB1`. Windows reports it
-as a COM port such as `COM7`. Those names can change after re-enumeration, so
-clients must retain the opaque `port.id`, not the operating-system name. The
-ID is derived from the VID, PID, shared EEPROM serial, and channel.
+Linux reports serial ports as devices such as `/dev/ttyUSB1`. Windows reports
+them as COM ports such as `COM3` or `COM7`. Automatically matchable FTDI ports
+receive an ID derived from VID, PID, shared EEPROM serial, and channel. Other
+ports receive an opaque ID derived from their current operating-system name;
+clients must refresh discovery after re-enumeration rather than persist a
+manual association indefinitely.
 
 `GET /api/v1/xilinx/targets` compares each XSDB cable serial with the local
 FTDI EEPROM serial and returns:
@@ -22,13 +25,15 @@ FTDI EEPROM serial and returns:
 - `not_found` when the UART is not visible on the Station host; or
 - `ambiguous` when the EEPROM serial is duplicated.
 
-A remote `hw_server` target is associated only when its matching UART is
-attached locally to the Station. The browser requires this match. API clients
-that do not need a console may continue to omit `serialConsole` from a job.
+A remote `hw_server` target is associated automatically only when its matching
+UART is attached locally to the Station. JTAG discovery and boot do not depend
+on UART availability. The browser lets an operator keep serial capture off,
+use the automatic match, or explicitly choose a different tty/COM port for
+each target.
 
 ## Discover and attach
 
-List supported local UARTs:
+List local serial ports:
 
 ```http
 GET /api/v1/serial/ports
@@ -101,10 +106,26 @@ Add `serialConsole` to `POST /api/v1/jobs`:
 }
 ```
 
-For the Xilinx runner, the backend verifies that `portId` belongs to
-`targetCableSerial`. It opens the RX-only capture before XSDB is allowed to
-run. If discovery, pairing, permissions, port configuration, or attachment
-fails, the job fails without touching the target.
+The default `selection` is `matched`, so the Xilinx runner verifies that
+`portId` belongs to `targetCableSerial`. To record an explicit operator
+override, send a currently enumerated port with `selection: "manual"`:
+
+```json
+{
+  "serialConsole": {
+    "portId": "<manually-selected-port-id>",
+    "baudRate": 115200,
+    "selection": "manual"
+  }
+}
+```
+
+Manual selection confirms only that the port is visible on this Station; it
+does not claim that the tty/COM port belongs to the selected JTAG cable, and a
+warning is recorded in the job event log. The backend opens RX-only capture
+before XSDB is allowed to run. If the requested serial port cannot be
+discovered, configured, or opened, the job fails without touching the target.
+Omit `serialConsole` to run JTAG without any UART dependency.
 
 The persisted job record includes `serialCapture` metadata. Download retained
 raw bytes with:
@@ -121,15 +142,15 @@ limit with `--max-console-log-bytes` or
 
 ## Host access
 
-On Linux, the Station process needs read/write access to the FTDI tty. The
+On Linux, the Station process needs read/write access to the selected tty. The
 Debian package adds its service account to `dialout` when that group exists.
 For a portable launch, add the invoking user to the distribution's serial-port
 group, then start a new login session. Do not make the tty world-writable.
 
-On Windows, install the FTDI virtual COM port driver if the adapter does not
-appear in Device Manager. Only one operating-system process can normally open
-a COM port, so close external terminal programs before connecting through the
-Station.
+On Windows, install the device's virtual COM port driver (the FTDI driver for
+FT2232H adapters) if it does not appear in Device Manager. Only one
+operating-system process can normally open a COM port, so close external
+terminal programs before connecting through the Station.
 
 The complete schemas and error responses are in
 [`../api/openapi.yaml`](../api/openapi.yaml).

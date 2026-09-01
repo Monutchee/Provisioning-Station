@@ -28,6 +28,10 @@ func (fakeXSDB) Run(context.Context, xsdb.Request, xsdb.LogFunc) error { return 
 
 type fakeSerialMatcher struct{ port serialconsole.Port }
 
+func (matcher fakeSerialMatcher) List(context.Context) (serialconsole.Discovery, error) {
+	return serialconsole.Discovery{Ports: []serialconsole.Port{matcher.port}}, nil
+}
+
 func (matcher fakeSerialMatcher) MatchCableSerial(_ context.Context, serialNumber string) (serialconsole.Port, string, error) {
 	if matcher.port.USBSerial != serialNumber {
 		return serialconsole.Port{}, "not_found", serialconsole.ErrPortNotFound
@@ -156,6 +160,17 @@ func TestXilinxRequiresSerialPortPairedWithCable(t *testing.T) {
 	request.SerialConsole.PortID = "uart-b"
 	if err := hardwareRunner.Validate(stored, request); err == nil || !strings.Contains(err.Error(), "does not belong") {
 		t.Fatalf("mismatched UART error = %v", err)
+	}
+	request.TargetCableSerial = "BOARD-B"
+	request.SerialConsole = &jobs.SerialConsoleRequest{
+		PortID: port.ID, BaudRate: 115200, Selection: jobs.SerialSelectionManual,
+	}
+	if err := hardwareRunner.Validate(stored, request); err != nil {
+		t.Fatalf("manual UART selection rejected: %v", err)
+	}
+	request.SerialConsole.PortID = "missing-uart"
+	if err := hardwareRunner.Validate(stored, request); err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("missing manual UART error = %v", err)
 	}
 }
 

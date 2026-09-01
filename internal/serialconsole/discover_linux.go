@@ -17,21 +17,23 @@ import (
 func nativeCandidates() ([]candidate, error) {
 	ports, err := enumerator.GetDetailedPortsList()
 	if err != nil {
-		return nil, err
+		return nameOnlyCandidates(err)
 	}
 	result := make([]candidate, 0)
 	for _, port := range ports {
-		if !port.IsUSB || !strings.EqualFold(port.VID, FTDIVendorID) || !strings.EqualFold(port.PID, FT2232HProductID) {
+		if port == nil || port.Name == "" {
 			continue
 		}
-		channel, err := linuxUSBChannel(port.Name)
-		if err != nil || channel != FT2232HUARTChannel {
-			continue
+		value := candidate{
+			Name: port.Name, VendorID: strings.ToUpper(port.VID), ProductID: strings.ToUpper(port.PID),
+			USBSerial: port.SerialNumber,
 		}
-		result = append(result, candidate{
-			Name: port.Name, VendorID: FTDIVendorID, ProductID: FT2232HProductID,
-			USBSerial: port.SerialNumber, Channel: channel,
-		})
+		if port.IsUSB && strings.EqualFold(port.VID, FTDIVendorID) && strings.EqualFold(port.PID, FT2232HProductID) {
+			if channel, channelErr := linuxUSBChannel(port.Name); channelErr == nil {
+				value.Channel = channel
+			}
+		}
+		result = append(result, value)
 	}
 	return result, nil
 }
