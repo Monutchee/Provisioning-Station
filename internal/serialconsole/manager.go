@@ -152,7 +152,7 @@ func (manager *Manager) MatchCableSerial(ctx context.Context, serialNumber strin
 		}
 	}
 	for _, port := range result.Ports {
-		if port.USBSerial == serialNumber {
+		if automaticallyMatchable(port) && port.USBSerial == serialNumber {
 			return port, "matched", nil
 		}
 	}

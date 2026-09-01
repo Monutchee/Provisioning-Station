@@ -138,9 +138,9 @@
               <small>Overrides the artifact default</small>
             </label>
             <label class="field">
-              <span>Serial baud</span>
-              <input id="serial-baud" name="serialBaud" type="number" min="300" max="4000000" step="1" value="115200" required>
-              <small>8 data bits, no parity, 1 stop bit</small>
+              <span>Serial baud <em>optional for JTAG</em></span>
+              <input id="serial-baud" name="serialBaud" type="number" min="300" max="4000000" step="1" value="115200">
+              <small>Used for selected serial capture and the live console · 8 data bits, no parity, 1 stop bit</small>
             </label>
           </div>
           <div class="form-error hidden" id="form-error" role="alert"></div>

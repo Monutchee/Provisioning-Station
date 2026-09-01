@@ -16,7 +16,7 @@ Browser or mnc deploy
         | HTTP API (default 0.0.0.0:8042)
         v
 Provisioning Station
-   | XSDB             | read-only TFTP       | FTDI channel B UART
+   | XSDB             | read-only TFTP       | optional tty/COM UART
    v                  v                      v
 Xilinx hw_server ── JTAG ──> target board <──┘
 ```
@@ -34,8 +34,9 @@ Before starting a real JTAG boot, make sure that:
 - A local or remote Xilinx `hw_server` is running and reachable, normally on
   TCP port 3121.
 - The JTAG adapter is visible to `hw_server`.
-- The FT2232H channel B tty/COM port is visible on the Station computer and
-  its EEPROM serial is unique. Channel A remains the JTAG interface.
+- For automatic UART capture, the FT2232H channel B tty/COM port is visible on
+  the Station computer and its EEPROM serial is unique. UART is optional for
+  JTAG boot, and any enumerated serial port can be selected manually.
 - The target board can reach the Station computer over the provisioning
   network.
 - UDP port 69 is available for the Station's TFTP listener.
@@ -115,7 +116,7 @@ journalctl -u mnc-station -f
 ```
 
 The package adds the `mnc-station` service account to the `dialout` group when
-that group exists, allowing it to open FTDI tty devices after installation.
+that group exists, allowing it to open serial tty devices after installation.
 For a portable launch, add your own user to the distribution's serial-port
 group and begin a new login session. Keep normal device permissions; do not
 make `/dev/ttyUSB*` world-writable.
@@ -192,10 +193,10 @@ Firewall on the trusted provisioning network. If the MSI Start menu shortcut
 is used, configure `MNC_XSDB` as a persistent user or system environment
 variable, or make XSDB available on `PATH`.
 
-The FTDI virtual COM port driver must be installed and the channel B COM port
-must not already be open in another terminal program. Station discovers the
-COM number dynamically and uses the adapter's EEPROM serial for stable
-pairing.
+For UART capture, install the appropriate virtual COM port driver and close
+other terminal programs that own the port. Station lists the current COM
+numbers and uses a unique FTDI EEPROM serial for automatic pairing when that
+identity is available.
 
 Stop a foreground Station with `Ctrl+C` on either platform.
 
@@ -211,10 +212,11 @@ Stop a foreground Station with `Ctrl+C` on either platform.
 5. Select the imported artifact.
 6. Enter the hardware-server URL. Use `tcp:127.0.0.1:3121` for a local
    `hw_server`, or for example `tcp:192.0.2.40:3121` for a remote server.
-7. Scan the hardware server and select one or more JTAG devices. Cable serial,
-   device name/index, XSDB target ID, and its paired local UART identify each
-   entry. A target without one safe FTDI channel B match is disabled. Multiple
-   devices create sequential jobs using the same artifact.
+7. Scan the hardware server and select one or more JTAG devices. Every detected
+   JTAG target remains selectable. For each target, keep its automatic FTDI
+   match, choose a specific tty/COM port, or select **No serial capture (JTAG
+   only)**. Multiple devices create sequential jobs using the same artifact;
+   choose a different serial port for each device.
 8. Verify the prefilled Station TFTP IPv4 address. The dashboard selects the
    first usable interface reported by the operating system and lists every
    detected interface/IP. On a multi-NIC Station, select an entry or manually
@@ -223,8 +225,9 @@ Stop a foreground Station with `Ctrl+C` on either platform.
 9. Optionally enter the board IPv4 address. When supplied, the TFTP server
    rejects requests from other client addresses. Leave it empty for a
    multi-device boot so DHCP can assign each board a unique address.
-10. Confirm the serial baud rate, then start the jobs and follow their ordered
-    event logs. UART capture opens before XSDB and is retained with the job.
+10. When a serial port is selected, confirm the baud rate. Start the jobs and
+    follow their ordered event logs. Requested UART capture opens before XSDB
+    and is retained with the job; JTAG-only jobs have no UART dependency.
 11. Use the Serial console panel to connect interactively. One browser or API
     client can type at a time; additional clients attach read-only. Select a
     completed job and load its retained transcript from the same panel.
@@ -409,7 +412,11 @@ leases, and capture behavior are explained in
 - A remote `hw_server` does not make its host's COM port available remotely;
   the matching UART must be attached to the Station host.
 - Program a unique, non-empty FTDI EEPROM serial. Duplicate serials are
-  rejected because they cannot be associated safely.
+  excluded from automatic association because they cannot be paired safely.
+- If the correct port is listed (for example `COM3`) but cannot be matched,
+  select it explicitly for that JTAG target. This is an operator override;
+  verify the physical cable-to-port relationship first. Select **No serial
+  capture (JTAG only)** when UART is not needed.
 - On Linux, check the Station user's serial-port group membership and tty
   permissions. On Windows, close other terminal applications that may own the
   COM port.

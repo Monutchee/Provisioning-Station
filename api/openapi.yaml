@@ -119,11 +119,11 @@ paths:
           $ref: "#/components/responses/BadRequest"
   /serial/ports:
     get:
-      summary: Discover supported local FTDI UART channels
+      summary: Discover local operating-system serial ports
       description: >-
-        Returns channel B of locally attached FT2232H devices (VID 0403,
-        PID 6010). Ports without a unique EEPROM serial are excluded so a
-        future client can use the same stable device identity safely.
+        Returns locally enumerated Linux tty and Windows COM ports. A unique
+        FT2232H channel B identity is used for automatic JTAG association;
+        every other listed port remains available for explicit manual use.
       responses:
         "200":
           description: Stable serial-console ports and identity warnings
@@ -492,23 +492,32 @@ components:
           $ref: "#/components/schemas/SerialPort"
     SerialPort:
       type: object
-      required: [id, name, vendorId, productId, usbSerial, channel, busy, hasController]
+      required: [id, name, busy, hasController]
       properties:
         id:
           type: string
-          description: Stable hash of VID, PID, shared EEPROM serial, and interface channel.
+          description: >-
+            Opaque port ID. Automatically matchable FTDI ports retain a stable
+            hardware-derived ID; manual-only ports use their current OS name.
         name:
           type: string
           description: Current operating-system name such as /dev/ttyUSB1 or COM7.
         vendorId:
-          const: "0403"
+          type: string
+          pattern: "^[0-9A-Fa-f]{4}$"
+          description: USB vendor ID when reported by the operating system.
         productId:
-          const: "6010"
+          type: string
+          pattern: "^[0-9A-Fa-f]{4}$"
+          description: USB product ID when reported by the operating system.
         usbSerial:
           type: string
           minLength: 1
+          description: USB serial when reported by the operating system.
         channel:
-          const: B
+          type: string
+          enum: [A, B]
+          description: FT2232H interface channel when it can be determined.
         busy:
           type: boolean
           description: The backend currently has this physical port open.
@@ -637,12 +646,20 @@ components:
           properties:
             portId:
               type: string
-              description: Stable ID of the UART paired to targetCableSerial.
+              description: ID returned by GET /serial/ports.
             baudRate:
               type: integer
               minimum: 300
               maximum: 4000000
               description: Uses the Station default when omitted.
+            selection:
+              type: string
+              enum: [matched, manual]
+              default: matched
+              description: >-
+                matched requires the Xilinx runner to verify the FTDI identity
+                against targetCableSerial. manual explicitly selects any
+                currently enumerated tty/COM port without asserting a pairing.
     Job:
       type: object
       required: [id, request, state, createdUtc, eventCount]
