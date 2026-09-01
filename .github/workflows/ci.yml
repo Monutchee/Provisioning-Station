@@ -24,6 +24,14 @@ jobs:
       - run: go test ./...
       - run: go vet ./...
       - run: go build -trimpath ./cmd/mnc-station
+      - name: Verify Windows MSI packaging
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release\input | Out-Null
+          Copy-Item -Path mnc-station.exe, LICENSE, THIRD_PARTY_NOTICES.md -Destination release\input\
+          dotnet tool install --global wix --version 6.0.0
+          wix build -arch x64 -d Version=0.0.0 -d SourceDir="$pwd\release\input" -o release\mnc-station-ci.msi packaging\windows\Product.wxs
 
   quality:
     name: Format, race, and cross-compile
