@@ -57,6 +57,8 @@ install -m 0644 "${PROJECT_ROOT}/packaging/bash-completion/mnc-station" \
     "${PACKAGE_ROOT}/usr/share/bash-completion/completions/mnc-station"
 install -m 0644 "${PROJECT_ROOT}/packaging/systemd/mnc-station.service" \
     "${PACKAGE_ROOT}/lib/systemd/system/mnc-station.service"
+install -m 0644 "${PROJECT_ROOT}/packaging/systemd/mnc-station-hw-server.service" \
+    "${PACKAGE_ROOT}/lib/systemd/system/mnc-station-hw-server.service"
 install -m 0644 "${PROJECT_ROOT}/packaging/systemd/mnc-station.default" \
     "${PACKAGE_ROOT}/etc/default/mnc-station"
 
@@ -87,6 +89,9 @@ fi
 if getent group dialout >/dev/null; then
     adduser mnc-station dialout >/dev/null 2>&1 || true
 fi
+if getent group plugdev >/dev/null; then
+    adduser mnc-station plugdev >/dev/null 2>&1 || true
+fi
 install -d -m 0700 -o mnc-station -g mnc-station /var/lib/mnc-station
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
@@ -100,7 +105,9 @@ cat > "${PACKAGE_ROOT}/DEBIAN/prerm" <<'EOF'
 set -e
 if [ "$1" = remove ] && command -v systemctl >/dev/null 2>&1; then
     systemctl stop mnc-station.service >/dev/null 2>&1 || true
+    systemctl stop mnc-station-hw-server.service >/dev/null 2>&1 || true
     systemctl disable mnc-station.service >/dev/null 2>&1 || true
+    systemctl disable mnc-station-hw-server.service >/dev/null 2>&1 || true
 fi
 EOF
 

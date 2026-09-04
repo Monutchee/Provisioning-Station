@@ -3,6 +3,12 @@
 # Set this only for a nonstandard install or explicit version selection.
 # MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
 
+# The companion service automatically finds hw_server and binds it to loopback
+# so only software on this Station can control JTAG. Override either setting
+# for a nonstandard installation or an intentionally LAN-accessible server.
+# MNC_HW_SERVER=/opt/Xilinx/2025.2/HWSRVR/bin/hw_server
+# MNC_HW_SERVER_LISTEN=tcp:127.0.0.1:3121
+
 # The packaged service listens on every IPv4 interface by default. Override it
 # with the following setting when the dashboard must be local-only.
 # MNC_STATION_HTTP_LISTEN=127.0.0.1:8042
