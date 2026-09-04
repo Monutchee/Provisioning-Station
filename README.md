@@ -6,8 +6,9 @@ RAM boot over JTAG, with the boot payload served by the agent's read-only TFTP
 server.
 
 The agent is open source and intentionally contains no Vivado or Xilinx
-libraries. It invokes `xsdb` from an existing Vivado/Vitis installation and can
-connect to either a local or remote `hw_server`.
+libraries. It invokes `xsdb` from an existing Vivado, Vitis, or standalone
+Hardware Server installation and can connect to either a local or remote
+`hw_server`.
 
 ```text
 Browser / mnc / future cloud controller
@@ -75,8 +76,10 @@ The agent listens on `0.0.0.0:8042` by default. Open the dashboard locally at
 `http://<station-ip-or-hostname>:8042/`. Use HTTP, not HTTPS, unless a TLS
 reverse proxy has been configured. An explicit XSDB path can also be passed
 with `--xsdb-path`. If neither is set, the agent checks `PATH` first, then
-`XILINX_VITIS`/`XILINX_VIVADO`, and finally searches versioned Vivado and Vitis
-installations below `/opt/Xilinx` on Linux or `C:\Xilinx` on Windows.
+`XILINX_VITIS`/`XILINX_VIVADO`, and finally searches versioned Vivado, Vitis,
+and standalone Hardware Server (`HWSRVR`) installations below `/opt/Xilinx`
+on Linux or `C:\Xilinx` on Windows. This includes paths such as
+`/opt/Xilinx/2025.2/HWSRVR/bin/xsdb`.
 
 Real boards request TFTP on UDP port 69. On Linux, install the deb/service (it
 has only the narrow low-port capability) or grant that capability to a local

@@ -86,6 +86,8 @@ func findXSDBInInstallRoot(root string) (string, error) {
 		filepath.Join(root, "*", "Vitis", "bin", name),
 		filepath.Join(root, "Vivado", "*", "bin", name),
 		filepath.Join(root, "*", "Vivado", "bin", name),
+		filepath.Join(root, "HWSRVR", "*", "bin", name),
+		filepath.Join(root, "*", "HWSRVR", "bin", name),
 		filepath.Join(root, "bin", name),
 	}
 	var candidates []string

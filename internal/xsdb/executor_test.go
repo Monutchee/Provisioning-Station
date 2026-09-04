@@ -194,6 +194,33 @@ func TestResolveFindsNewestDefaultXilinxInstallation(t *testing.T) {
 	}
 }
 
+func TestResolveFindsHWSRVRInstallation(t *testing.T) {
+	clearXSDBEnvironment(t)
+	t.Setenv("PATH", "")
+
+	for _, relative := range [][]string{
+		{"2025.2", "HWSRVR", "bin", executableName("xsdb")},
+		{"HWSRVR", "2025.2", "bin", executableName("xsdb")},
+	} {
+		t.Run(filepath.Join(relative...), func(t *testing.T) {
+			installRoot := t.TempDir()
+			want := writeTestXSDB(t, filepath.Join(append([]string{installRoot}, relative...)...))
+
+			resolved, err := (Executor{}).resolve([]string{installRoot})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err = filepath.Abs(want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved != want {
+				t.Fatalf("resolved=%q want=%q", resolved, want)
+			}
+		})
+	}
+}
+
 func TestDefaultInstallRootMatchesPlatform(t *testing.T) {
 	roots := defaultInstallRoots()
 	if len(roots) != 1 {

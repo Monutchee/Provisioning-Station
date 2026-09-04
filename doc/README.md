@@ -30,7 +30,8 @@ be able to reach the Station computer's TFTP IPv4 address.
 Before starting a real JTAG boot, make sure that:
 
 - A Linux or Windows Station binary is installed or extracted.
-- XSDB is installed on the Station computer as part of Vivado or Vitis.
+- XSDB is installed on the Station computer as part of Vivado, Vitis, or the
+  standalone Hardware Server package.
 - A local or remote Xilinx `hw_server` is running and reachable, normally on
   TCP port 3121.
 - The JTAG adapter is visible to `hw_server`.
@@ -70,8 +71,9 @@ the future protected release pipeline.
 ## Start the Station on Linux
 
 The Station searches `PATH` first, followed by Xilinx environment variables
-and versioned installations below `/opt/Xilinx`. Set an explicit path only for
-a nonstandard installation or to select a specific XSDB version:
+and versioned Vivado, Vitis, and standalone Hardware Server (`HWSRVR`)
+installations below `/opt/Xilinx`. Set an explicit path only for a nonstandard
+installation or to select a specific XSDB version:
 
 ```bash
 export MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
@@ -100,8 +102,9 @@ only useful for development and automated tests.
 
 The Debian package installs and enables `mnc-station.service`. The service has
 a smaller `PATH` than an interactive shell, but it automatically searches
-versioned Vivado and Vitis installations below `/opt/Xilinx`. To override the
-detected executable, configure XSDB in `/etc/default/mnc-station`:
+versioned Vivado, Vitis, and standalone Hardware Server (`HWSRVR`)
+installations below `/opt/Xilinx`. To override the detected executable,
+configure XSDB in `/etc/default/mnc-station`:
 
 ```text
 MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
@@ -174,9 +177,10 @@ directory.
 ## Start the Station on Windows
 
 Open PowerShell or a Xilinx command prompt. The Station searches `PATH`, Xilinx
-environment variables, and versioned Vivado/Vitis installations below
-`C:\Xilinx`. Provide the path to `xsdb.bat` only when automatic discovery does
-not select the desired installation:
+environment variables, and versioned Vivado, Vitis, and standalone Hardware
+Server (`HWSRVR`) installations below `C:\Xilinx`. Provide the path to
+`xsdb.bat` only when automatic discovery does not select the desired
+installation:
 
 ```powershell
 $env:MNC_XSDB = "C:\Xilinx\Vitis\2025.2\bin\xsdb.bat"
