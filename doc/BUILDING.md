@@ -396,7 +396,7 @@ $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
 
 ### Windows builds but XSDB is unavailable
 
-Compilation does not install Xilinx software. Install Vivado or Vitis on the
-Station computer. The agent searches `PATH` and `C:\Xilinx`; set `MNC_XSDB` to
-the full `xsdb.bat` path only for a nonstandard installation or explicit
-version selection.
+Compilation does not install Xilinx software. Install Vivado, Vitis, or the
+standalone Hardware Server package on the Station computer. The agent searches
+`PATH` and `C:\Xilinx`; set `MNC_XSDB` to the full `xsdb.bat` path only for a
+nonstandard installation or explicit version selection.
