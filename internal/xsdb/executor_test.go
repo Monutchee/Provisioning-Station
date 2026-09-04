@@ -154,9 +154,9 @@ func TestRunPassesStationArgumentsAndCapturesOutput(t *testing.T) {
 func TestResolvePrefersPathBeforeDefaultInstallRoot(t *testing.T) {
 	clearXSDBEnvironment(t)
 	pathDirectory := t.TempDir()
-	pathExecutable := writeTestXSDB(t, filepath.Join(pathDirectory, executableName("xsdb")))
+	pathExecutable := writeTestTool(t, filepath.Join(pathDirectory, executableName("xsdb")))
 	installRoot := t.TempDir()
-	writeTestXSDB(t, filepath.Join(installRoot, "Vitis", "2099.1", "bin", executableName("xsdb")))
+	writeTestTool(t, filepath.Join(installRoot, "Vitis", "2099.1", "bin", executableName("xsdb")))
 	t.Setenv("PATH", pathDirectory)
 
 	resolved, err := (Executor{}).resolve([]string{installRoot})
@@ -176,10 +176,10 @@ func TestResolveFindsNewestDefaultXilinxInstallation(t *testing.T) {
 	clearXSDBEnvironment(t)
 	t.Setenv("PATH", "")
 	installRoot := t.TempDir()
-	writeTestXSDB(t, filepath.Join(installRoot, "Vivado", "2024.2", "bin", executableName("xsdb")))
-	writeTestXSDB(t, filepath.Join(installRoot, "2025.2", "Vivado", "bin", executableName("xsdb")))
-	writeTestXSDB(t, filepath.Join(installRoot, "Vitis", "2025.10", "bin", executableName("xsdb")))
-	want := writeTestXSDB(t, filepath.Join(installRoot, "2026.1", "Vitis", "bin", executableName("xsdb")))
+	writeTestTool(t, filepath.Join(installRoot, "Vivado", "2024.2", "bin", executableName("xsdb")))
+	writeTestTool(t, filepath.Join(installRoot, "2025.2", "Vivado", "bin", executableName("xsdb")))
+	writeTestTool(t, filepath.Join(installRoot, "Vitis", "2025.10", "bin", executableName("xsdb")))
+	want := writeTestTool(t, filepath.Join(installRoot, "2026.1", "Vitis", "bin", executableName("xsdb")))
 
 	resolved, err := (Executor{}).resolve([]string{installRoot})
 	if err != nil {
@@ -191,6 +191,67 @@ func TestResolveFindsNewestDefaultXilinxInstallation(t *testing.T) {
 	}
 	if resolved != want {
 		t.Fatalf("resolved=%q want=%q", resolved, want)
+	}
+}
+
+func TestResolveFindsHWSRVRInstallation(t *testing.T) {
+	clearXSDBEnvironment(t)
+	t.Setenv("PATH", "")
+
+	for _, relative := range [][]string{
+		{"2025.2", "HWSRVR", "bin", executableName("xsdb")},
+		{"HWSRVR", "2025.2", "bin", executableName("xsdb")},
+	} {
+		t.Run(filepath.Join(relative...), func(t *testing.T) {
+			installRoot := t.TempDir()
+			want := writeTestTool(t, filepath.Join(append([]string{installRoot}, relative...)...))
+
+			resolved, err := (Executor{}).resolve([]string{installRoot})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err = filepath.Abs(want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved != want {
+				t.Fatalf("resolved=%q want=%q", resolved, want)
+			}
+		})
+	}
+}
+
+func TestResolveHWServerFindsHWSRVRInstallation(t *testing.T) {
+	clearXSDBEnvironment(t)
+	t.Setenv("PATH", "")
+	installRoot := t.TempDir()
+	want := writeTestTool(t, filepath.Join(
+		installRoot, "2025.2", "HWSRVR", "bin", executableName("hw_server"),
+	))
+
+	resolved, err := resolveHWServer("", []string{installRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err = filepath.Abs(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != want {
+		t.Fatalf("resolved=%q want=%q", resolved, want)
+	}
+}
+
+func TestResolveRejectsNonExecutableTool(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows executable permissions do not use Unix mode bits")
+	}
+	path := filepath.Join(t.TempDir(), "hw_server")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveHWServer(path, nil); err == nil || !strings.Contains(err.Error(), "not executable") {
+		t.Fatalf("error=%v", err)
 	}
 }
 
@@ -210,12 +271,12 @@ func TestDefaultInstallRootMatchesPlatform(t *testing.T) {
 
 func clearXSDBEnvironment(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{"MNC_XSDB", "XILINX_VITIS", "XILINX_VIVADO"} {
+	for _, name := range []string{"MNC_XSDB", "MNC_HW_SERVER", "XILINX_VITIS", "XILINX_VIVADO"} {
 		t.Setenv(name, "")
 	}
 }
 
-func writeTestXSDB(t *testing.T, path string) string {
+func writeTestTool(t *testing.T, path string) string {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)

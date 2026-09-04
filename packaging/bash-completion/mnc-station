@@ -27,7 +27,7 @@ _mnc_station()
     fi
 
     if ((COMP_CWORD == 1)); then
-        mapfile -t COMPREPLY < <(compgen -W 'serve inspect token version help --version --help -version -h' -- "${cur}")
+        mapfile -t COMPREPLY < <(compgen -W 'serve hw-server inspect token version help --version --help -version -h' -- "${cur}")
         return
     fi
 
@@ -57,6 +57,27 @@ _mnc_station()
                     ;;
             esac
             mapfile -t COMPREPLY < <(compgen -W '--http-listen --tftp-listen --data-dir --xsdb-path --api-token-file --job-timeout --max-artifact-bytes --max-unpacked-bytes --serial-baud --max-console-log-bytes --open-browser --help -h' -- "${cur}")
+            ;;
+        hw-server)
+            case "${cur}" in
+                --hw-server-path=*|-hw-server-path=*)
+                    prefix="${cur%%=*}="
+                    value="${cur#*=}"
+                    _mnc_station_complete_files "${prefix}" "${value}"
+                    return
+                    ;;
+            esac
+            case "${prev}" in
+                --hw-server-path|-hw-server-path)
+                    _mnc_station_complete_files "" "${cur}"
+                    return
+                    ;;
+                --listen|-listen)
+                    COMPREPLY=()
+                    return
+                    ;;
+            esac
+            mapfile -t COMPREPLY < <(compgen -W '--hw-server-path --listen --check --help -h --' -- "${cur}")
             ;;
         inspect)
             if [[ "${cur}" == -* ]]; then

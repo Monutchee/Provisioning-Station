@@ -6,8 +6,9 @@ RAM boot over JTAG, with the boot payload served by the agent's read-only TFTP
 server.
 
 The agent is open source and intentionally contains no Vivado or Xilinx
-libraries. It invokes `xsdb` from an existing Vivado/Vitis installation and can
-connect to either a local or remote `hw_server`.
+libraries. It invokes `xsdb` from an existing Vivado, Vitis, or standalone
+Hardware Server installation and can connect to either a local or remote
+`hw_server`.
 
 ```text
 Browser / mnc / future cloud controller
@@ -75,8 +76,15 @@ The agent listens on `0.0.0.0:8042` by default. Open the dashboard locally at
 `http://<station-ip-or-hostname>:8042/`. Use HTTP, not HTTPS, unless a TLS
 reverse proxy has been configured. An explicit XSDB path can also be passed
 with `--xsdb-path`. If neither is set, the agent checks `PATH` first, then
-`XILINX_VITIS`/`XILINX_VIVADO`, and finally searches versioned Vivado and Vitis
-installations below `/opt/Xilinx` on Linux or `C:\Xilinx` on Windows.
+`XILINX_VITIS`/`XILINX_VIVADO`, and finally searches versioned Vivado, Vitis,
+and standalone Hardware Server (`HWSRVR`) installations below `/opt/Xilinx`
+on Linux or `C:\Xilinx` on Windows. This includes paths such as
+`/opt/Xilinx/2025.2/HWSRVR/bin/xsdb`.
+
+The Debian service also starts a companion local Xilinx `hw_server` when one
+is discoverable. It runs as the dedicated `mnc-station` account rather than a
+login user and listens only on `127.0.0.1:3121` by default. XSDB itself remains
+an on-demand process started for target discovery and provisioning jobs.
 
 Real boards request TFTP on UDP port 69. On Linux, install the deb/service (it
 has only the narrow low-port capability) or grant that capability to a local
@@ -124,6 +132,11 @@ The most useful service flags and environment variables are:
 | `--api-token-file` | `MNC_STATION_TOKEN_FILE` | none |
 | `--serial-baud` | `MNC_STATION_SERIAL_BAUD` | `115200` |
 | `--max-console-log-bytes` | `MNC_STATION_MAX_CONSOLE_LOG_BYTES` | `16777216` |
+
+The companion `mnc-station hw-server` command accepts `--hw-server-path` and
+`--listen`. Their service environment equivalents are `MNC_HW_SERVER` and
+`MNC_HW_SERVER_LISTEN`; the defaults are automatic executable discovery and
+`tcp:127.0.0.1:3121`.
 
 `MNC_STATION_TOKEN` can supply the token directly. Direct browser/API requests
 to an IP loopback URL such as `http://127.0.0.1:8042` or `http://[::1]:8042`

@@ -223,15 +223,18 @@ The package installs:
 - `/usr/bin/mnc-station`
 - `/usr/share/bash-completion/completions/mnc-station`
 - `/lib/systemd/system/mnc-station.service`
+- `/lib/systemd/system/mnc-station-hw-server.service`
 - `/etc/default/mnc-station`
 - `/var/lib/mnc-station`
 - `/usr/share/doc/mnc-station`
 
-The service runs as the dedicated `mnc-station` account and receives only
-`CAP_NET_BIND_SERVICE`, which is needed for TFTP port 69. Configure the XSDB
-path in `/etc/default/mnc-station` after installation. The post-install script
-also adds that account to `dialout` when available so it can open FTDI tty
-devices.
+The Station and local Xilinx hardware-server services run as the dedicated
+`mnc-station` account, whose home is `/var/lib/mnc-station`. The Station service
+receives only `CAP_NET_BIND_SERVICE`, which is needed for TFTP port 69. The
+post-install script also adds that account to `dialout` when available so it
+can open FTDI tty devices, and to `plugdev` when available for group-accessible
+JTAG devices. Xilinx's cable-driver udev rules remain responsible for granting
+access to the JTAG adapter.
 
 ## Build the Windows MSI
 
@@ -348,6 +351,8 @@ Use this checklist for release candidates:
 - `mnc-station inspect` accepts a real Yocto Station artifact.
 - Release archives extract successfully.
 - Debian metadata and file ownership are correct.
+- The Debian hardware-server unit resolves the installed Xilinx `hw_server`
+  and listens only on loopback by default.
 - MSI install, upgrade, launch, and uninstall succeed on Windows.
 - The dashboard loads and reports XSDB availability.
 - A separately authorized board smoke test transfers every TFTP payload and
@@ -396,7 +401,7 @@ $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
 
 ### Windows builds but XSDB is unavailable
 
-Compilation does not install Xilinx software. Install Vivado or Vitis on the
-Station computer. The agent searches `PATH` and `C:\Xilinx`; set `MNC_XSDB` to
-the full `xsdb.bat` path only for a nonstandard installation or explicit
-version selection.
+Compilation does not install Xilinx software. Install Vivado, Vitis, or the
+standalone Hardware Server package on the Station computer. The agent searches
+`PATH` and `C:\Xilinx`; set `MNC_XSDB` to the full `xsdb.bat` path only for a
+nonstandard installation or explicit version selection.
