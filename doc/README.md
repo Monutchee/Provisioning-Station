@@ -98,16 +98,32 @@ mnc-station serve --tftp-listen=127.0.0.1:6969 --open-browser
 A real board still sends its initial TFTP request to port 69, so port 6969 is
 only useful for development and automated tests.
 
-### Linux system service
+### Linux system services
 
-The Debian package installs and enables `mnc-station.service`. The service has
-a smaller `PATH` than an interactive shell, but it automatically searches
-versioned Vivado, Vitis, and standalone Hardware Server (`HWSRVR`)
-installations below `/opt/Xilinx`. To override the detected executable,
-configure XSDB in `/etc/default/mnc-station`:
+The Debian package installs and enables `mnc-station.service`. It pulls in the
+companion `mnc-station-hw-server.service`, which starts a local Xilinx
+`hw_server` automatically when one is available. Both services run as the
+dedicated `mnc-station` account. Its home and writable working directory are
+`/var/lib/mnc-station`, so neither service depends on a developer's user name
+or home directory.
+
+The services have a smaller `PATH` than an interactive shell, but they
+automatically search versioned Vivado, Vitis, and standalone Hardware Server
+(`HWSRVR`) installations below `/opt/Xilinx`. Override either detected
+executable in `/etc/default/mnc-station` only when necessary:
 
 ```text
 MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
+MNC_HW_SERVER=/opt/Xilinx/2025.2/HWSRVR/bin/hw_server
+```
+
+The managed hardware server listens on `tcp:127.0.0.1:3121` by default. This
+keeps the unauthenticated JTAG control port off the LAN while allowing the
+local Station to use it. Set `MNC_HW_SERVER_LISTEN` only when another trusted
+computer must connect directly:
+
+```text
+MNC_HW_SERVER_LISTEN=tcp:192.0.2.40:3121
 ```
 
 Then restart and inspect the service:
@@ -115,14 +131,20 @@ Then restart and inspect the service:
 ```bash
 sudo systemctl restart mnc-station
 systemctl status mnc-station
-journalctl -u mnc-station -f
+systemctl status mnc-station-hw-server
+journalctl -u mnc-station -u mnc-station-hw-server -f
 ```
 
-The package adds the `mnc-station` service account to the `dialout` group when
-that group exists, allowing it to open serial tty devices after installation.
-For a portable launch, add your own user to the distribution's serial-port
-group and begin a new login session. Keep normal device permissions; do not
-make `/dev/ttyUSB*` world-writable.
+Do not run a second local `hw_server` on port 3121. Disable any hand-written
+unit before starting the packaged companion service. XSDB is not a daemon;
+the Station starts it on demand for target discovery and provisioning jobs.
+
+The package adds the `mnc-station` service account to `dialout` and `plugdev`
+when those groups exist, allowing it to open serial tty and group-accessible
+JTAG devices after installation. Xilinx's cable-driver udev rules must still
+be installed. For a portable launch, add your own user to the distribution's
+device groups and begin a new login session. Keep normal device permissions;
+do not make `/dev/ttyUSB*` world-writable.
 
 The service listens on every IPv4 interface. A direct local connection at
 `http://127.0.0.1:8042/` skips token verification. From another computer, open:
@@ -314,6 +336,12 @@ The commonly used settings are:
 
 Run `mnc-station serve -help` for the complete option list.
 
+The Linux companion service runs `mnc-station hw-server`. That command accepts
+`--hw-server-path` (`MNC_HW_SERVER`) and `--listen`
+(`MNC_HW_SERVER_LISTEN`). The defaults are automatic discovery and
+`tcp:127.0.0.1:3121`; `--check` reports whether an executable can be resolved
+without starting it.
+
 On a normal user launch, data is stored below the operating system's user
 configuration directory. Typical locations are:
 
@@ -384,6 +412,19 @@ leases, and capture behavior are explained in
   the service.
 - XSDB must be installed on the Station computer even when `hw_server` is
   remote.
+
+### The managed hardware server is unavailable
+
+- Run `sudo -u mnc-station mnc-station hw-server --check` to verify discovery
+  using the service identity.
+- Inspect `systemctl status mnc-station-hw-server` and
+  `journalctl -u mnc-station-hw-server --no-pager -n 100`.
+- Set `MNC_HW_SERVER` in `/etc/default/mnc-station` when the executable uses a
+  nonstandard path, then restart `mnc-station`.
+- Install the Xilinx cable-driver udev rules so the unprivileged service
+  account can access the JTAG adapter. Do not run `hw_server` as root to work
+  around missing device rules.
+- Stop any other `hw_server` instance already listening on TCP port 3121.
 
 ### The TFTP listener cannot start
 

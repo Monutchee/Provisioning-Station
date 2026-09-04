@@ -12,6 +12,51 @@ import (
 	"testing"
 )
 
+func TestRunXilinxHWServerCheck(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "hw_server")
+	if err := os.WriteFile(executable, []byte("test executable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MNC_HW_SERVER", executable)
+	t.Setenv("MNC_HW_SERVER_LISTEN", "tcp:127.0.0.1:3121")
+	if err := runXilinxHWServer([]string{"--check"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunXilinxHWServerUsesLoopbackAndPassesArguments(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "hw_server")
+	if err := os.WriteFile(executable, []byte("test executable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MNC_HW_SERVER", executable)
+	t.Setenv("MNC_HW_SERVER_LISTEN", "")
+	var resolved string
+	var arguments []string
+	err := runXilinxHWServerWithExecutor([]string{"--", "-q"}, func(path string, values []string) error {
+		resolved = path
+		arguments = append([]string(nil), values...)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != executable {
+		t.Fatalf("resolved=%q want=%q", resolved, executable)
+	}
+	want := []string{"-stcp:127.0.0.1:3121", "-q"}
+	if strings.Join(arguments, " ") != strings.Join(want, " ") {
+		t.Fatalf("arguments=%q want=%q", arguments, want)
+	}
+}
+
+func TestRunXilinxHWServerRejectsInvalidListenURL(t *testing.T) {
+	if err := runXilinxHWServer([]string{"--check", "--listen=not-a-url"}); err == nil ||
+		!strings.Contains(err.Error(), "invalid hw_server listen URL") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestDefaultServeConfigListensOnAllIPv4Interfaces(t *testing.T) {
 	t.Setenv("MNC_STATION_HTTP_LISTEN", "")
 	config, err := defaultServeConfig()

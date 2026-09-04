@@ -81,6 +81,11 @@ and standalone Hardware Server (`HWSRVR`) installations below `/opt/Xilinx`
 on Linux or `C:\Xilinx` on Windows. This includes paths such as
 `/opt/Xilinx/2025.2/HWSRVR/bin/xsdb`.
 
+The Debian service also starts a companion local Xilinx `hw_server` when one
+is discoverable. It runs as the dedicated `mnc-station` account rather than a
+login user and listens only on `127.0.0.1:3121` by default. XSDB itself remains
+an on-demand process started for target discovery and provisioning jobs.
+
 Real boards request TFTP on UDP port 69. On Linux, install the deb/service (it
 has only the narrow low-port capability) or grant that capability to a local
 development binary:
@@ -127,6 +132,11 @@ The most useful service flags and environment variables are:
 | `--api-token-file` | `MNC_STATION_TOKEN_FILE` | none |
 | `--serial-baud` | `MNC_STATION_SERIAL_BAUD` | `115200` |
 | `--max-console-log-bytes` | `MNC_STATION_MAX_CONSOLE_LOG_BYTES` | `16777216` |
+
+The companion `mnc-station hw-server` command accepts `--hw-server-path` and
+`--listen`. Their service environment equivalents are `MNC_HW_SERVER` and
+`MNC_HW_SERVER_LISTEN`; the defaults are automatic executable discovery and
+`tcp:127.0.0.1:3121`.
 
 `MNC_STATION_TOKEN` can supply the token directly. Direct browser/API requests
 to an IP loopback URL such as `http://127.0.0.1:8042` or `http://[::1]:8042`

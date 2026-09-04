@@ -41,6 +41,7 @@ const usage = `Monutchee Provisioning Station
 
 Usage:
   mnc-station serve [options]
+  mnc-station hw-server [options] [-- hw_server-options...]
   mnc-station inspect [options] <artifact.tar.gz>
   mnc-station token [options]
   mnc-station version
@@ -62,6 +63,8 @@ func run(arguments []string) error {
 	switch arguments[0] {
 	case "serve":
 		return runServe(arguments[1:])
+	case "hw-server":
+		return runXilinxHWServer(arguments[1:])
 	case "inspect":
 		return runInspect(arguments[1:])
 	case "token":
@@ -75,6 +78,50 @@ func run(arguments []string) error {
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", arguments[0], usage)
 	}
+}
+
+func runXilinxHWServer(arguments []string) error {
+	return runXilinxHWServerWithExecutor(arguments, executeXilinxHWServer)
+}
+
+func runXilinxHWServerWithExecutor(arguments []string, execute func(string, []string) error) error {
+	flags := flag.NewFlagSet("hw-server", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	path := os.Getenv("MNC_HW_SERVER")
+	listen := environmentOr("MNC_HW_SERVER_LISTEN", "tcp:127.0.0.1:3121")
+	check := false
+	flags.StringVar(&path, "hw-server-path", path, "explicit Xilinx hw_server executable path")
+	flags.StringVar(&listen, "listen", listen, "Xilinx hw_server TCP listen URL; empty uses the vendor default")
+	flags.BoolVar(&check, "check", false, "resolve hw_server and exit without starting it")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if check && flags.NArg() != 0 {
+		return fmt.Errorf("hw-server --check accepts no hw_server arguments")
+	}
+	if listen != "" {
+		if err := xsdb.ValidateHWServerURL(listen); err != nil {
+			return fmt.Errorf("invalid hw_server listen URL: %w", err)
+		}
+	}
+	resolved, err := xsdb.ResolveHWServer(path)
+	if err != nil {
+		return err
+	}
+	if check {
+		fmt.Println(resolved)
+		return nil
+	}
+
+	hardwareServerArguments := flags.Args()
+	if listen != "" {
+		hardwareServerArguments = append([]string{"-s" + listen}, hardwareServerArguments...)
+	}
+	fmt.Printf("Starting Xilinx hw_server: %s\n", resolved)
+	if err := execute(resolved, hardwareServerArguments); err != nil {
+		return fmt.Errorf("run Xilinx hw_server: %w", err)
+	}
+	return nil
 }
 
 func runServe(arguments []string) error {
