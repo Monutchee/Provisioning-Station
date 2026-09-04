@@ -1,0 +1,37 @@
+[Unit]
+Description=Xilinx Hardware Server for Monutchee Provisioning Station
+After=network-online.target
+Wants=network-online.target
+Before=mnc-station.service
+PartOf=mnc-station.service
+
+[Service]
+Type=exec
+User=mnc-station
+Group=mnc-station
+Environment=HOME=/var/lib/mnc-station
+EnvironmentFile=-/etc/default/mnc-station
+WorkingDirectory=/var/lib/mnc-station
+ExecCondition=/usr/bin/mnc-station hw-server --check
+ExecStart=/usr/bin/mnc-station hw-server
+Restart=on-failure
+RestartSec=2s
+CapabilityBoundingSet=
+LockPersonality=true
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ReadWritePaths=/var/lib/mnc-station
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,8 +1,8 @@
 // Copyright 2026 Monutchee
 // SPDX-License-Identifier: Apache-2.0
 
-// Package xsdb resolves and executes the Xilinx XSDB tool without linking any
-// Vivado libraries into the Station agent.
+// Package xsdb resolves the Xilinx debug tools and executes XSDB without
+// linking any Vivado libraries into the Station agent.
 package xsdb
 
 import (
@@ -42,13 +42,27 @@ func (executor Executor) Resolve() (string, error) {
 }
 
 func (executor Executor) resolve(installRoots []string) (string, error) {
-	if executor.Path != "" {
-		return resolveCandidate(executor.Path)
+	return resolveXilinxTool(executor.Path, "MNC_XSDB", "xsdb-path", "xsdb", installRoots)
+}
+
+// ResolveHWServer locates the Xilinx hardware server executable. An explicit
+// path takes precedence over MNC_HW_SERVER and automatic discovery.
+func ResolveHWServer(path string) (string, error) {
+	return resolveHWServer(path, defaultInstallRoots())
+}
+
+func resolveHWServer(path string, installRoots []string) (string, error) {
+	return resolveXilinxTool(path, "MNC_HW_SERVER", "hw-server-path", "hw_server", installRoots)
+}
+
+func resolveXilinxTool(path, overrideEnvironment, option, name string, installRoots []string) (string, error) {
+	if path != "" {
+		return resolveCandidate(path, name)
 	}
-	if value := os.Getenv("MNC_XSDB"); value != "" {
-		return resolveCandidate(value)
+	if value := os.Getenv(overrideEnvironment); value != "" {
+		return resolveCandidate(value, name)
 	}
-	if path, err := exec.LookPath(executableName("xsdb")); err == nil {
+	if path, err := exec.LookPath(executableName(name)); err == nil {
 		return filepath.Abs(path)
 	}
 	for _, environment := range []string{"XILINX_VITIS", "XILINX_VIVADO"} {
@@ -56,19 +70,19 @@ func (executor Executor) resolve(installRoots []string) (string, error) {
 		if root == "" {
 			continue
 		}
-		candidate := filepath.Join(root, "bin", executableName("xsdb"))
-		if path, err := resolveCandidate(candidate); err == nil {
+		candidate := filepath.Join(root, "bin", executableName(name))
+		if path, err := resolveCandidate(candidate, name); err == nil {
 			return path, nil
 		}
 	}
 	for _, root := range installRoots {
-		if path, err := findXSDBInInstallRoot(root); err == nil {
+		if path, err := findToolInInstallRoot(root, name); err == nil {
 			return path, nil
 		}
 	}
 	return "", fmt.Errorf(
-		"xsdb was not found in PATH, XILINX_VITIS/XILINX_VIVADO, or the default install locations %s; set --xsdb-path or MNC_XSDB to override discovery",
-		strings.Join(installRoots, ", "),
+		"%s was not found in PATH, XILINX_VITIS/XILINX_VIVADO, or the default install locations %s; set --%s or %s to override discovery",
+		name, strings.Join(installRoots, ", "), option, overrideEnvironment,
 	)
 }
 
@@ -79,8 +93,8 @@ func defaultInstallRoots() []string {
 	return []string{"/opt/Xilinx"}
 }
 
-func findXSDBInInstallRoot(root string) (string, error) {
-	name := executableName("xsdb")
+func findToolInInstallRoot(root, tool string) (string, error) {
+	name := executableName(tool)
 	patterns := []string{
 		filepath.Join(root, "Vitis", "*", "bin", name),
 		filepath.Join(root, "*", "Vitis", "bin", name),
@@ -101,7 +115,7 @@ func findXSDBInInstallRoot(root string) (string, error) {
 			if _, exists := seen[candidate]; exists {
 				continue
 			}
-			if _, err := resolveCandidate(candidate); err != nil {
+			if _, err := resolveCandidate(candidate, tool); err != nil {
 				continue
 			}
 			seen[candidate] = struct{}{}
@@ -109,7 +123,7 @@ func findXSDBInInstallRoot(root string) (string, error) {
 		}
 	}
 	if len(candidates) == 0 {
-		return "", fmt.Errorf("xsdb was not found below %s", root)
+		return "", fmt.Errorf("%s was not found below %s", tool, root)
 	}
 	sort.SliceStable(candidates, func(first, second int) bool {
 		return compareVersions(candidateVersion(candidates[first], root), candidateVersion(candidates[second], root)) > 0
@@ -316,21 +330,27 @@ func ValidateIPv4(label, value string, optional bool) error {
 	return nil
 }
 
-func resolveCandidate(candidate string) (string, error) {
+func resolveCandidate(candidate, name string) (string, error) {
 	if !filepath.IsAbs(candidate) && !strings.ContainsRune(candidate, os.PathSeparator) {
 		path, err := exec.LookPath(candidate)
 		if err != nil {
-			return "", fmt.Errorf("find xsdb executable %q: %w", candidate, err)
+			return "", fmt.Errorf("find %s executable %q: %w", name, candidate, err)
 		}
 		candidate = path
 	}
 	absolute, err := filepath.Abs(candidate)
 	if err != nil {
-		return "", fmt.Errorf("resolve xsdb executable: %w", err)
+		return "", fmt.Errorf("resolve %s executable: %w", name, err)
 	}
 	info, err := os.Stat(absolute)
-	if err != nil || !info.Mode().IsRegular() {
-		return "", fmt.Errorf("xsdb executable is not a regular file: %s", absolute)
+	if err != nil {
+		return "", fmt.Errorf("inspect %s executable %s: %w", name, absolute, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%s executable is not a regular file: %s", name, absolute)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		return "", fmt.Errorf("%s executable is not executable: %s", name, absolute)
 	}
 	return absolute, nil
 }

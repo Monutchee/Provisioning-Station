@@ -1,13 +1,14 @@
 [Unit]
 Description=Monutchee Provisioning Station
-After=network-online.target
-Wants=network-online.target
+After=network-online.target mnc-station-hw-server.service
+Wants=network-online.target mnc-station-hw-server.service
 
 [Service]
 Type=simple
 User=mnc-station
 Group=mnc-station
 EnvironmentFile=-/etc/default/mnc-station
+WorkingDirectory=/var/lib/mnc-station
 ExecStart=/usr/bin/mnc-station serve --tftp-listen=:69 --data-dir=/var/lib/mnc-station
 Restart=on-failure
 RestartSec=2s
