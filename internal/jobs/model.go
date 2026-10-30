@@ -3,7 +3,11 @@
 
 package jobs
 
-import "time"
+import (
+	"time"
+
+	"github.com/Monutchee/Provisioning-Station/internal/tasks"
+)
 
 type State string
 
@@ -20,6 +24,7 @@ func (state State) Terminal() bool {
 }
 
 type Request struct {
+	DeploymentTasks   *tasks.Plan           `json:"deploymentTasks,omitempty"`
 	ArtifactID        string                `json:"artifactId"`
 	HWServerURL       string                `json:"hwServerUrl"`
 	TFTPServerIP      string                `json:"tftpServerIp"`
@@ -53,15 +58,19 @@ type SerialCapture struct {
 }
 
 type Job struct {
-	ID            string         `json:"id"`
-	Request       Request        `json:"request"`
-	State         State          `json:"state"`
-	CreatedUTC    time.Time      `json:"createdUtc"`
-	StartedUTC    *time.Time     `json:"startedUtc,omitempty"`
-	FinishedUTC   *time.Time     `json:"finishedUtc,omitempty"`
-	Error         string         `json:"error,omitempty"`
-	EventCount    int            `json:"eventCount"`
-	SerialCapture *SerialCapture `json:"serialCapture,omitempty"`
+	TaskResults       []tasks.Result `json:"taskResults,omitempty"`
+	DeploymentError   string         `json:"deploymentError,omitempty"`
+	DeploymentOutcome string         `json:"deploymentOutcome,omitempty"`
+	TaskErrors        []string       `json:"taskErrors,omitempty"`
+	ID                string         `json:"id"`
+	Request           Request        `json:"request"`
+	State             State          `json:"state"`
+	CreatedUTC        time.Time      `json:"createdUtc"`
+	StartedUTC        *time.Time     `json:"startedUtc,omitempty"`
+	FinishedUTC       *time.Time     `json:"finishedUtc,omitempty"`
+	Error             string         `json:"error,omitempty"`
+	EventCount        int            `json:"eventCount"`
+	SerialCapture     *SerialCapture `json:"serialCapture,omitempty"`
 }
 
 type Event struct {
@@ -73,6 +82,7 @@ type Event struct {
 
 func cloneRequest(request Request) Request {
 	result := request
+	result.DeploymentTasks = request.DeploymentTasks.Clone()
 	if request.SerialConsole != nil {
 		serialRequest := *request.SerialConsole
 		result.SerialConsole = &serialRequest
@@ -82,6 +92,14 @@ func cloneRequest(request Request) Request {
 
 func cloneJob(job *Job) Job {
 	result := *job
+	result.TaskResults = append([]tasks.Result(nil), job.TaskResults...)
+	for i := range result.TaskResults {
+		if result.TaskResults[i].FinishedUTC != nil {
+			stamp := *result.TaskResults[i].FinishedUTC
+			result.TaskResults[i].FinishedUTC = &stamp
+		}
+	}
+	result.TaskErrors = append([]string(nil), job.TaskErrors...)
 	result.Request = cloneRequest(job.Request)
 	if job.SerialCapture != nil {
 		capture := *job.SerialCapture

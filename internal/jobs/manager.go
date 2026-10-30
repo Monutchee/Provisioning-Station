@@ -20,6 +20,7 @@ import (
 
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
 	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
+	"github.com/Monutchee/Provisioning-Station/internal/tasks"
 )
 
 type Runner interface {
@@ -32,6 +33,18 @@ type ConsoleService interface {
 }
 
 type ManagerOption func(*Manager) error
+
+func WithDeploymentTasks(registry *tasks.Registry) ManagerOption {
+	return func(manager *Manager) error {
+		if registry == nil {
+			return fmt.Errorf("deployment task registry must not be nil")
+		}
+		manager.tasks = registry
+		return nil
+	}
+}
+
+func (manager *Manager) TaskCapabilities() tasks.Capabilities { return manager.tasks.Capabilities() }
 
 func WithSerialConsole(service ConsoleService, maxLogBytes int64) ManagerOption {
 	return func(manager *Manager) error {
@@ -48,6 +61,7 @@ func WithSerialConsole(service ConsoleService, maxLogBytes int64) ManagerOption 
 }
 
 type Manager struct {
+	tasks              *tasks.Registry
 	root               string
 	artifacts          *artifact.Store
 	runner             Runner
@@ -124,6 +138,9 @@ func (manager *Manager) Create(request Request) (Job, error) {
 
 func (manager *Manager) CreateContext(ctx context.Context, request Request) (Job, error) {
 	request = cloneRequest(request)
+	if err := manager.tasks.Validate(request.DeploymentTasks); err != nil {
+		return Job{}, err
+	}
 	if request.ArtifactID == "" {
 		return Job{}, fmt.Errorf("artifactId must not be empty")
 	}
@@ -313,9 +330,12 @@ func (manager *Manager) run(id string) {
 	job.StartedUTC = &now
 	manager.emitLocked(job, "info", "Job started")
 	_ = manager.persistLocked(job)
-	request := job.Request
+	request := cloneRequest(job.Request)
 	manager.mutex.Unlock()
 
+	runContext = tasks.WithBeforeBoot(runContext, func(ctx context.Context) error {
+		return manager.runTaskPhase(ctx, id, request, tasks.BeforeBoot)
+	})
 	stored, loadErr := manager.artifacts.Load(request.ArtifactID)
 	var runErr error
 	if loadErr != nil {
@@ -368,10 +388,54 @@ func (manager *Manager) run(id string) {
 			}
 		}
 	}
-	cancel()
-
+	// Select exactly one outcome phase from deployment execution. A later hook
+	// failure never selects another phase; cancellation stops further launches.
+	if runContext.Err() != nil {
+		runErr = runContext.Err()
+	}
+	phase, outcome := tasks.OnSuccess, string(StateSucceeded)
+	if errors.Is(runErr, context.Canceled) {
+		phase, outcome = tasks.OnCancel, string(StateCanceled)
+	} else if runErr != nil {
+		phase, outcome = tasks.OnFailure, string(StateFailed)
+	}
+	manager.mutex.Lock()
+	manager.jobs[id].DeploymentOutcome = outcome
+	if runErr != nil {
+		manager.jobs[id].DeploymentError = runErr.Error()
+	}
+	_ = manager.persistLocked(manager.jobs[id])
+	manager.mutex.Unlock()
+	hookContext := runContext
+	stopHooks := func() {}
+	if phase == tasks.OnCancel {
+		hookContext, stopHooks = context.WithTimeout(context.WithoutCancel(runContext), tasks.CancelTimeout)
+	} else if phase == tasks.OnFailure {
+		// Boot deadlines belong to the runner. Failure tasks get their own finite
+		// timeouts, but a new user cancellation still interrupts this phase.
+		detached, stop := context.WithCancel(context.WithoutCancel(runContext))
+		stopPropagation := context.AfterFunc(runContext, stop)
+		hookContext = detached
+		stopHooks = func() { stopPropagation(); stop() }
+	}
+	hookErr := manager.runTaskPhase(hookContext, id, request, phase)
+	stopHooks()
+	if hookErr != nil {
+		manager.mutex.Lock()
+		manager.jobs[id].TaskErrors = append(manager.jobs[id].TaskErrors, hookErr.Error())
+		manager.emitLocked(manager.jobs[id], "error", hookErr.Error())
+		manager.mutex.Unlock()
+		if runErr == nil {
+			runErr = hookErr
+		}
+	}
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
+	// Cancel shares this lock: honor a request accepted before terminal publication.
+	if runContext.Err() != nil {
+		runErr = runContext.Err()
+	}
+	cancel()
 	delete(manager.cancellers, id)
 	job = manager.jobs[id]
 	if job == nil {
@@ -458,6 +522,13 @@ func (manager *Manager) load() error {
 			job.State = StateFailed
 			job.FinishedUTC = &now
 			job.Error = "station stopped before the job completed"
+			for i := range job.TaskResults {
+				if job.TaskResults[i].State == "running" {
+					job.TaskResults[i].State = "interrupted"
+					job.TaskResults[i].FinishedUTC = &now
+					job.TaskResults[i].Error = "station stopped during task execution"
+				}
+			}
 			if job.SerialCapture != nil && job.SerialCapture.State == "capturing" {
 				job.SerialCapture.State = "failed"
 				job.SerialCapture.FinishedUTC = &now
@@ -542,4 +613,29 @@ func randomID() (string, error) {
 		return "", fmt.Errorf("generate job ID: %w", err)
 	}
 	return hex.EncodeToString(data), nil
+}
+
+func (manager *Manager) runTaskPhase(ctx context.Context, id string, request Request, phase string) error {
+	return manager.tasks.Run(ctx, phase, request.DeploymentTasks.Phase(phase), tasks.Context{
+		JobID: id, ArtifactID: request.ArtifactID, HWServerURL: request.HWServerURL,
+		BoardIP: request.BoardIP, TargetID: request.TargetID, TargetCableSerial: request.TargetCableSerial,
+		TargetDeviceIndex: request.TargetDeviceIndex,
+	}, func(level, message string) { manager.emit(id, level, message) }, func(result tasks.Result) {
+		manager.mutex.Lock()
+		defer manager.mutex.Unlock()
+		job := manager.jobs[id]
+		found := false
+		for i := range job.TaskResults {
+			if job.TaskResults[i].ID == result.ID {
+				job.TaskResults[i] = result
+				found = true
+				break
+			}
+		}
+		if !found {
+			job.TaskResults = append(job.TaskResults, result)
+		}
+		manager.emitLocked(job, "info", fmt.Sprintf("Task %s (%s) %s", result.ID, result.Phase, result.State))
+		_ = manager.persistLocked(job)
+	})
 }

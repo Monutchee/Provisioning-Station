@@ -396,6 +396,8 @@ components:
               type: integer
             maxUncompressedBytes:
               type: integer
+        deploymentTasks:
+          $ref: "#/components/schemas/DeploymentTaskCapabilities"
         executors:
           type: array
           items:
@@ -609,11 +611,113 @@ components:
         manifest:
           type: object
           description: Validated mnc-station-artifact v2 manifest.
+    DeploymentTaskInvocation:
+      type: object
+      additionalProperties: false
+      required: [id, task, parameters]
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        task:
+          type: string
+          description: Trusted registered task identifier advertised by this Station.
+        parameters:
+          type: object
+          description: Flat parameters validated against the task descriptor. Integers must be within the JSON safe integer range.
+          additionalProperties:
+            type: [string, boolean, number]
+    DeploymentTasks:
+      type: object
+      additionalProperties: false
+      required: [version]
+      description: At most 64 invocation IDs, unique across all four ordered phases. No executable paths or shell commands.
+      properties:
+        version:
+          const: 1
+        beforeBoot:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeploymentTaskInvocation"
+        onSuccess:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeploymentTaskInvocation"
+        onFailure:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeploymentTaskInvocation"
+        onCancel:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeploymentTaskInvocation"
+    DeploymentTaskCapabilities:
+      type: object
+      required: [versions, phases, tasks]
+      properties:
+        versions:
+          type: array
+          items:
+            const: 1
+        phases:
+          type: array
+          items:
+            enum: [beforeBoot, onSuccess, onFailure, onCancel]
+        tasks:
+          type: array
+          items:
+            type: object
+            required: [id, parameters, timeoutSeconds]
+            properties:
+              id:
+                type: string
+              timeoutSeconds:
+                type: number
+                exclusiveMinimum: 0
+                maximum: 3600
+              parameters:
+                type: array
+                items:
+                  type: object
+                  required: [name, type, required]
+                  properties:
+                    name:
+                      type: string
+                    type:
+                      enum: [string, boolean, integer, number]
+                    required:
+                      type: boolean
+                    enum:
+                      type: array
+                      items:
+                        type: [string, boolean, number]
+    DeploymentTaskResult:
+      type: object
+      required: [id, task, phase, state, startedUtc]
+      properties:
+        id:
+          type: string
+        task:
+          type: string
+        phase:
+          enum: [beforeBoot, onSuccess, onFailure, onCancel]
+        state:
+          enum: [running, succeeded, failed, canceled, interrupted]
+        startedUtc:
+          type: string
+          format: date-time
+        finishedUtc:
+          type: string
+          format: date-time
+        error:
+          type: string
     JobRequest:
       type: object
       additionalProperties: false
       required: [artifactId, hwServerUrl, tftpServerIp]
       properties:
+        deploymentTasks:
+          $ref: "#/components/schemas/DeploymentTasks"
         artifactId:
           type: string
           pattern: "^[0-9a-f]{64}$"
@@ -664,6 +768,20 @@ components:
       type: object
       required: [id, request, state, createdUtc, eventCount]
       properties:
+        deploymentError:
+          type: string
+          description: Primary deployment error retained even if outcome tasks are canceled.
+        deploymentOutcome:
+          enum: [succeeded, failed, canceled]
+          description: Primary deployment outcome before the selected outcome tasks.
+        taskErrors:
+          type: array
+          items:
+            type: string
+        taskResults:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeploymentTaskResult"
         id:
           type: string
         request:

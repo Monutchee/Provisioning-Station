@@ -34,6 +34,8 @@ agent exposes the stable boundary they can call later.
   `mnc deploy`, authentication, and troubleshooting.
 - [Serial console API](doc/SERIAL_CONSOLE.md) — serial discovery, FTDI identity,
   manual tty/COM selection, live WebSocket sessions, and per-job capture.
+- [Deployment tasks](doc/DEPLOYMENT_TASKS.md) — trusted task registration, lifecycle,
+  cancellation, and capability negotiation.
 - [Building guide](doc/BUILDING.md) — Linux and Windows builds, tests,
   cross-compilation, Debian packages, MSI creation, and release verification.
 

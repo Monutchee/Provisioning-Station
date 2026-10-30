@@ -28,6 +28,7 @@ import (
 	"github.com/Monutchee/Provisioning-Station/internal/jobs"
 	"github.com/Monutchee/Provisioning-Station/internal/runner"
 	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
+	"github.com/Monutchee/Provisioning-Station/internal/tasks"
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
 
@@ -234,9 +235,16 @@ func serve(config serveConfig) error {
 	if err != nil {
 		return err
 	}
+	// Trusted compiled adapters register here. An empty registry deliberately
+	// exposes no device-specific operations until their contracts are defined.
+	taskRegistry, err := tasks.New()
+	if err != nil {
+		return err
+	}
 	jobManager, err := jobs.OpenManager(
 		filepath.Join(config.DataDir, "jobs"), store, hardwareRunner,
 		jobs.WithSerialConsole(consoleManager, config.MaxConsoleLogBytes),
+		jobs.WithDeploymentTasks(taskRegistry),
 	)
 	if err != nil {
 		return err

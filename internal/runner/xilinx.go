@@ -17,6 +17,7 @@ import (
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
 	"github.com/Monutchee/Provisioning-Station/internal/jobs"
 	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
+	"github.com/Monutchee/Provisioning-Station/internal/tasks"
 	"github.com/Monutchee/Provisioning-Station/internal/tftp"
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
@@ -110,6 +111,13 @@ func (runner *Xilinx) Run(
 	eventsDone := make(chan struct{})
 	go monitorTransfers(runContext, tftpServer.Events(), expected, allTransfersDone, eventsDone, emit)
 
+	if err := tasks.ExecuteBeforeBoot(runContext); err != nil {
+		cancel()
+		_ = tftpServer.Close()
+		<-serveDone
+		<-eventsDone
+		return err
+	}
 	xsdbErr := runner.config.Executor.Run(runContext, xsdb.Request{
 		Entrypoint:        entrypoint,
 		HWServerURL:       request.HWServerURL,
