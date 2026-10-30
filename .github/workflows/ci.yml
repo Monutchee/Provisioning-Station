@@ -59,7 +59,7 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: windows
           GOARCH: amd64
-      - name: Verify release packaging and cleanup
+      - name: Verify legacy release packaging and cleanup
         env:
           MNC_STATION_BUILD_ID: "012345"
         run: |
@@ -79,7 +79,8 @@ jobs:
           bash -n build/release-ci/deb-root/usr/share/bash-completion/completions/mnc-station
           test "$(dpkg-deb -f build/release-ci/mnc-station_0.0.0+012345_amd64.deb Version)" = '0.0.0+012345'
           build/release-ci/deb-root/usr/bin/mnc-station version | grep -F 'mnc-station 0.0.0+012345 (commit '
-          unset MNC_STATION_BUILD_ID
+      - name: Build and verify automatic packages
+        run: |
           ./packaging/build-release.sh build/development-ci
           commit="$(git rev-parse HEAD)"
           source packaging/git-version.sh
@@ -112,3 +113,13 @@ jobs:
           fi
           test -f build/override-rejected/sentinel
           grep -Fq 'requires the legacy VERSION OUTPUT_DIR form' build/override-rejected.log
+      - uses: actions/upload-artifact@v7
+        with:
+          name: station-packages
+          if-no-files-found: error
+          path: |
+            build/development-ci/mnc-station_*_linux_amd64.tar.gz
+            build/development-ci/mnc-station_*_linux_arm64.tar.gz
+            build/development-ci/mnc-station_*_amd64.deb
+            build/development-ci/mnc-station_*_arm64.deb
+            build/development-ci/mnc-station_*_windows_amd64.zip

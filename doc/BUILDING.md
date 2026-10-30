@@ -204,12 +204,11 @@ The `.deb` files are emitted when `dpkg-deb` is installed. The output directory
 is the final argument: using `release` writes to `release/`, and using
 `build/release` writes to `build/release/`, both under the repository root.
 
-The legacy two-argument form remains available for tagged-release workflows
-and explicit version builds. `VERSION` accepts `MAJOR.MINOR.PATCH`, optionally
-prefixed with `v`. With a `MNC_STATION_BUILD_ID` of 6–40 hexadecimal characters,
+The legacy two-argument form remains available for explicit version builds.
+`VERSION` accepts `MAJOR.MINOR.PATCH`, optionally prefixed with `v`. With a `MNC_STATION_BUILD_ID` of 6–40 hexadecimal characters,
 it produces `VERSION+<build-id>`; without the override it retains the previous
-`VERSION-dev+<commit>` behavior. The release workflow supplies its tagged base
-version and shared build ID explicitly:
+`VERSION-dev+<commit>` behavior. For example, an explicit version build can
+supply a base version and build ID:
 
 ```bash
 MNC_STATION_BUILD_ID=a1b2c3 \
@@ -318,11 +317,19 @@ The CI workflow runs on native Ubuntu and Windows workers. It performs:
 - Formatting and race-detector checks on Linux.
 - Linux arm64 and Windows amd64 cross-compilation.
 
+The Linux CI job builds and uploads automatic packages as the `station-packages`
+Actions artifact. Its five package filenames match a local automatic build of
+the same clean Git commit with the same tag history. Pull-request CI may check
+out GitHub's merge commit, which has its own commit hash and distance. Legacy
+`0.0.0+012345` packages are tested separately and are not uploaded. Extracted
+verification files are also excluded from the upload.
+
 The release workflow is triggered by a strict `vMAJOR.MINOR.PATCH` tag. It
-uses the first six hexadecimal characters of the tagged commit as the shared
-build ID, builds Linux archives, Debian packages, a Windows zip, a native
-Windows MSI, and SHA-256 checksums, and then creates a GitHub release. The
-workflow artifacts are temporary copies; the files attached to the GitHub
+uses the same Git-version helper and automatic build command as local builds.
+An exact clean tag produces `MAJOR.MINOR.PATCH` in every package filename and
+executable, including the native Windows MSI. It builds Linux archives, Debian
+packages, a Windows zip, the MSI, and SHA-256 checksums, then creates a GitHub
+release. The workflow artifacts are temporary copies; the files attached to the GitHub
 release are the permanent release downloads.
 
 Before creating a release tag, run locally:
@@ -348,19 +355,17 @@ is pushed, open the repository's **Actions** page to follow the `Release`
 workflow. When all jobs pass, the repository's **Releases** page contains:
 
 ```text
-mnc-station_0.1.0+<build-id>_linux_amd64.tar.gz
-mnc-station_0.1.0+<build-id>_linux_arm64.tar.gz
-mnc-station_0.1.0+<build-id>_amd64.deb
-mnc-station_0.1.0+<build-id>_arm64.deb
-mnc-station_0.1.0+<build-id>_windows_amd64.zip
-mnc-station_0.1.0+<build-id>_windows_amd64.msi
+mnc-station_0.1.0_linux_amd64.tar.gz
+mnc-station_0.1.0_linux_arm64.tar.gz
+mnc-station_0.1.0_amd64.deb
+mnc-station_0.1.0_arm64.deb
+mnc-station_0.1.0_windows_amd64.zip
+mnc-station_0.1.0_windows_amd64.msi
 SHA256SUMS
 ```
 
-The executable inside the MSI reports the complete
-`0.1.0+<build-id>` version. The MSI's internal Windows Installer version stays
-numeric (`0.1.0`) because Windows Installer does not accept Semantic Versioning
-build metadata in its three numeric product-version fields.
+The executable inside the MSI and its internal Windows Installer version both
+report `0.1.0`. Windows Installer requires three numeric product-version fields.
 
 ## Verification checklist
 
