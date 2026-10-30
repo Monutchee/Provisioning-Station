@@ -164,34 +164,52 @@ The Linux binary cannot be executed on Windows; test it on Linux or in CI.
 
 ## Build release archives and Debian packages
 
-Run the release builder on Linux, supplying the base version and output directory:
+Run the release builder on Linux with an output directory:
 
 ```bash
-./packaging/build-release.sh 0.1.2 build/release-dev
+./packaging/build-release.sh build/release-auto
 ```
 
-The version argument is required and must use `MAJOR.MINOR.PATCH` form, with
-an optional leading `v`. It is supplied by the caller, not inferred from a tag
-or source file. The script appends `-dev` and the first six hexadecimal
-characters of the current Git commit, then uses that same full version in every
-filename, executable, and Debian package. For example, commit `a1b2c3…` produces:
+The script derives its version from reachable canonical `vMAJOR.MINOR.PATCH`
+Git tags and the number of commits since the nearest matching tag, using Git's
+`describe` selection and distance. A clean exact `v0.1.2` tag produces `0.1.2`.
+Two commits after that tag produce `0.1.3-dev2+<commit>`, where `<commit>` is
+the first six hexadecimal characters of `HEAD`. This follows the next-patch
+and development-distance convention used by MBS, with Station's `-devN`
+spelling. The `v` belongs to the Git tag; package names and binary versions omit it.
+For example, two commits after `v0.1.2`, with `HEAD` beginning `a1b2c3`, produce:
 
 ```text
-build/release-dev/mnc-station_0.1.2-dev+a1b2c3_linux_amd64.tar.gz
-build/release-dev/mnc-station_0.1.2-dev+a1b2c3_linux_arm64.tar.gz
-build/release-dev/mnc-station_0.1.2-dev+a1b2c3_amd64.deb
-build/release-dev/mnc-station_0.1.2-dev+a1b2c3_arm64.deb
-build/release-dev/mnc-station_0.1.2-dev+a1b2c3_windows_amd64.zip
+build/release-auto/mnc-station_0.1.3-dev2+a1b2c3_linux_amd64.tar.gz
+build/release-auto/mnc-station_0.1.3-dev2+a1b2c3_linux_arm64.tar.gz
+build/release-auto/mnc-station_0.1.3-dev2+a1b2c3_amd64.deb
+build/release-auto/mnc-station_0.1.3-dev2+a1b2c3_arm64.deb
+build/release-auto/mnc-station_0.1.3-dev2+a1b2c3_windows_amd64.zip
 ```
 
-The `.deb` files are emitted when `dpkg-deb` is installed. The output directory
-is the second argument: using `release` writes to `release/`, and using
-`build/release` writes to `build/release/`, both under the repository root.
-A build identifies `HEAD`; uncommitted changes do not alter its version suffix.
+The same full version is embedded in every executable. Debian control metadata
+replaces `-dev` with `~dev`, for example `0.1.3~dev2+a1b2c3`, so `dpkg` sorts
+development packages before `0.1.3`. The `.deb` filename retains `-dev`.
 
-Set `MNC_STATION_BUILD_ID` to 6–40 hexadecimal characters to retain the tagged
-release format `MAJOR.MINOR.PATCH+<build-id>` without `-dev`. The release workflow
-uses this override to share one commit identifier across all platforms:
+Tracked changes append `.dirty` to the version metadata. A dirty exact tag
+becomes the next patch with `dev0`, for example `0.1.3-dev0+a1b2c3.dirty`.
+Untracked files do not affect the version, matching MBS's SCM convention.
+Without any reachable canonical release tags, the fallback is
+`0.1.0-dev<count>+<commit>`, counting all commits reachable from `HEAD`.
+Automatic mode rejects shallow history before cleaning output; fetch full
+history and tags with `git fetch --unshallow --tags` first. It also rejects
+`MNC_STATION_BUILD_ID`; unset that variable to use the Git-derived version.
+
+The `.deb` files are emitted when `dpkg-deb` is installed. The output directory
+is the final argument: using `release` writes to `release/`, and using
+`build/release` writes to `build/release/`, both under the repository root.
+
+The legacy two-argument form remains available for tagged-release workflows
+and explicit version builds. `VERSION` accepts `MAJOR.MINOR.PATCH`, optionally
+prefixed with `v`. With a `MNC_STATION_BUILD_ID` of 6–40 hexadecimal characters,
+it produces `VERSION+<build-id>`; without the override it retains the previous
+`VERSION-dev+<commit>` behavior. The release workflow supplies its tagged base
+version and shared build ID explicitly:
 
 ```bash
 MNC_STATION_BUILD_ID=a1b2c3 \
@@ -199,8 +217,8 @@ MNC_STATION_BUILD_ID=a1b2c3 \
 ```
 
 Six hexadecimal digits identify a commit prefix, not build order. For an apt
-feed, provide an increasing numeric UTC identifier when newer builds of the
-same base version must sort after older builds:
+feed, provide an increasing numeric UTC identifier in legacy mode when newer
+builds of the same base version must sort after older builds:
 
 ```bash
 MNC_STATION_BUILD_ID="$(date -u +%Y%m%d%H%M%S)" \
@@ -219,9 +237,9 @@ steps run in the Windows GitHub Actions jobs.
 Inspect and install a Debian package locally:
 
 ```bash
-dpkg-deb --info build/release-dev/mnc-station_0.1.2-dev+a1b2c3_amd64.deb
-dpkg-deb --contents build/release-dev/mnc-station_0.1.2-dev+a1b2c3_amd64.deb
-sudo apt install ./build/release-dev/mnc-station_0.1.2-dev+a1b2c3_amd64.deb
+dpkg-deb --info build/release-auto/mnc-station_0.1.3-dev2+a1b2c3_amd64.deb
+dpkg-deb --contents build/release-auto/mnc-station_0.1.3-dev2+a1b2c3_amd64.deb
+sudo apt install ./build/release-auto/mnc-station_0.1.3-dev2+a1b2c3_amd64.deb
 ```
 
 The package installs:
@@ -313,7 +331,7 @@ Before creating a release tag, run locally:
 make check
 make test-race
 make cross
-./packaging/build-release.sh 0.1.0 release
+./packaging/build-release.sh build/release-auto
 ```
 
 Do not create a release tag until the Linux hardware smoke test is complete.
@@ -356,6 +374,7 @@ Use this checklist for release candidates:
 - Windows amd64 compiles and native Windows tests succeed.
 - `mnc-station inspect` accepts a real Yocto Station artifact.
 - Release archives extract successfully.
+- `bash packaging/test-git-version.sh` passes synthetic Git-history cases.
 - Debian metadata and file ownership are correct.
 - The Debian hardware-server unit resolves the installed Xilinx `hw_server`
   and listens only on loopback by default.

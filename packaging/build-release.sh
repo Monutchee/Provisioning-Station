@@ -2,34 +2,43 @@
 
 set -Eeuo pipefail
 
-if (($# != 2)); then
-    printf 'Usage: %s VERSION OUTPUT_DIR\n' "$0" >&2
-    printf 'Default: VERSION-dev+<commit>; set MNC_STATION_BUILD_ID for VERSION+<build-id>.\n' >&2
+if (($# != 1 && $# != 2)); then
+    printf 'Usage: %s [VERSION] OUTPUT_DIR\n' "$0" >&2
+    printf 'With OUTPUT_DIR only, derive the version from Git tags and commit distance.\n' >&2
+    printf 'Legacy VERSION accepts MNC_STATION_BUILD_ID for VERSION+<build-id>.\n' >&2
     exit 2
 fi
 
-VERSION="${1#v}"
-OUTPUT_REQUEST="$2"
-[[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-    printf 'Release version must use MAJOR.MINOR.PATCH: %s\n' "${VERSION}" >&2
-    exit 2
-}
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-
 COMMIT="$(git -C "${PROJECT_ROOT}" rev-parse HEAD)"
-BUILD_ID="${MNC_STATION_BUILD_ID:-}"
-VERSION_SUFFIX=""
-if [[ -z "${BUILD_ID}" ]]; then
-    BUILD_ID="${COMMIT:0:6}"
-    VERSION_SUFFIX="-dev"
+if (($# == 1)); then
+    OUTPUT_REQUEST="$1"
+    if [[ -n "${MNC_STATION_BUILD_ID:-}" ]]; then
+        printf 'MNC_STATION_BUILD_ID requires the legacy VERSION OUTPUT_DIR form.\n' >&2
+        exit 2
+    fi
+    source "${PROJECT_ROOT}/packaging/git-version.sh"
+    RELEASE_VERSION="$(station_git_version "${PROJECT_ROOT}")"
+else
+    VERSION="${1#v}"
+    OUTPUT_REQUEST="$2"
+    [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+        printf 'Release version must use MAJOR.MINOR.PATCH: %s\n' "${VERSION}" >&2
+        exit 2
+    }
+    BUILD_ID="${MNC_STATION_BUILD_ID:-}"
+    VERSION_SUFFIX=""
+    if [[ -z "${BUILD_ID}" ]]; then
+        BUILD_ID="${COMMIT:0:6}"
+        VERSION_SUFFIX="-dev"
+    fi
+    BUILD_ID="${BUILD_ID,,}"
+    [[ "${BUILD_ID}" =~ ^[0-9a-f]{6,40}$ ]] || {
+        printf 'Build ID must contain 6 to 40 hexadecimal characters: %s\n' "${BUILD_ID}" >&2
+        exit 2
+    }
+    RELEASE_VERSION="${VERSION}${VERSION_SUFFIX}+${BUILD_ID}"
 fi
-BUILD_ID="${BUILD_ID,,}"
-[[ "${BUILD_ID}" =~ ^[0-9a-f]{6,40}$ ]] || {
-    printf 'Build ID must contain 6 to 40 hexadecimal characters: %s\n' \
-        "${BUILD_ID}" >&2
-    exit 2
-}
-RELEASE_VERSION="${VERSION}${VERSION_SUFFIX}+${BUILD_ID}"
 
 [[ -n "${OUTPUT_REQUEST}" && "${OUTPUT_REQUEST}" != *$'\n'* && \
    "${OUTPUT_REQUEST}" != *$'\r'* ]] || {

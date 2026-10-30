@@ -18,6 +18,8 @@ PROJECT_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd -P)"
     printf 'Invalid Debian package version: %s\n' "${VERSION}" >&2
     exit 2
 }
+# Debian uses ~ so development packages sort before the final release.
+DEBIAN_VERSION="${VERSION/-dev/~dev}"
 case "${ARCH}" in
     amd64|arm64) ;;
     *) printf 'Unsupported Debian architecture: %s\n' "${ARCH}" >&2; exit 2 ;;
@@ -66,7 +68,7 @@ install -m 0644 "${PROJECT_ROOT}/packaging/systemd/mnc-station.default" \
 
 cat > "${PACKAGE_ROOT}/DEBIAN/control" <<EOF
 Package: mnc-station
-Version: ${VERSION}
+Version: ${DEBIAN_VERSION}
 Section: utils
 Priority: optional
 Architecture: ${ARCH}
