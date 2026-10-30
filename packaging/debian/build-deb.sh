@@ -14,7 +14,7 @@ OUTPUT_DIR="$4"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd -P)"
 
-[[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+~-][A-Za-z0-9.-]+)?$ ]] || {
+[[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+~-][A-Za-z0-9.+-]+)?$ ]] || {
     printf 'Invalid Debian package version: %s\n' "${VERSION}" >&2
     exit 2
 }
@@ -49,6 +49,8 @@ install -m 0644 "${PROJECT_ROOT}/doc/README.md" \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station/doc/README.md"
 install -m 0644 "${PROJECT_ROOT}/doc/BUILDING.md" \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station/doc/BUILDING.md"
+install -m 0644 "${PROJECT_ROOT}/doc/DEPLOYMENT_TASKS.md" \
+    "${PACKAGE_ROOT}/usr/share/doc/mnc-station/doc/DEPLOYMENT_TASKS.md"
 install -m 0644 "${PROJECT_ROOT}/doc/SERIAL_CONSOLE.md" \
     "${PACKAGE_ROOT}/usr/share/doc/mnc-station/doc/SERIAL_CONSOLE.md"
 install -m 0644 "${PROJECT_ROOT}/api/openapi.yaml" \

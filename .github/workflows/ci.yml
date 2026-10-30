@@ -74,3 +74,26 @@ jobs:
           grep -Fq 'ExecStart=/usr/bin/mnc-station serve --tftp-listen=:69 --data-dir=/var/lib/mnc-station' build/release-ci/deb-root/lib/systemd/system/mnc-station.service
           test -f build/release-ci/deb-root/usr/share/bash-completion/completions/mnc-station
           bash -n build/release-ci/deb-root/usr/share/bash-completion/completions/mnc-station
+          test "$(dpkg-deb -f build/release-ci/mnc-station_0.0.0+012345_amd64.deb Version)" = '0.0.0+012345'
+          build/release-ci/deb-root/usr/bin/mnc-station version | grep -F 'mnc-station 0.0.0+012345 (commit '
+          unset MNC_STATION_BUILD_ID
+          ./packaging/build-release.sh v0.0.0 build/development-ci
+          commit="$(git rev-parse HEAD)"
+          version="0.0.0-dev+${commit:0:6}"
+          for suffix in linux_amd64.tar.gz linux_arm64.tar.gz windows_amd64.zip amd64.deb arm64.deb; do
+            test -f "build/development-ci/mnc-station_${version}_${suffix}"
+          done
+          test "$(dpkg-deb -f "build/development-ci/mnc-station_${version}_amd64.deb" Version)" = "$version"
+          dpkg-deb -x "build/development-ci/mnc-station_${version}_amd64.deb" build/development-ci/deb-root
+          build/development-ci/deb-root/usr/bin/mnc-station version | grep -F "mnc-station ${version} (commit ${commit},"
+          tar -xzf "build/development-ci/mnc-station_${version}_linux_amd64.tar.gz" -C build/development-ci
+          "build/development-ci/mnc-station_${version}_linux_amd64/mnc-station" version | grep -F "mnc-station ${version} (commit ${commit},"
+          test -f build/development-ci/deb-root/usr/share/doc/mnc-station/doc/DEPLOYMENT_TASKS.md
+          test -f "build/development-ci/mnc-station_${version}_linux_amd64/doc/DEPLOYMENT_TASKS.md"
+          unzip -Z1 "build/development-ci/mnc-station_${version}_windows_amd64.zip" | grep -Fx "mnc-station_${version}_windows_amd64/doc/DEPLOYMENT_TASKS.md"
+          for invalid in '0.0.0-dev+bad/path' '0.0.0-dev+bad value'; do
+            if ./packaging/debian/build-deb.sh "$invalid" amd64 build/development-ci/deb-root/usr/bin/mnc-station build/invalid-version >build/invalid-version.log 2>&1; then
+              exit 1
+            fi
+            grep -Fq 'Invalid Debian package version:' build/invalid-version.log
+          done

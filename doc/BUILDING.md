@@ -164,41 +164,47 @@ The Linux binary cannot be executed on Windows; test it on Linux or in CI.
 
 ## Build release archives and Debian packages
 
-Run the release builder on Linux:
+Run the release builder on Linux, supplying the base version and output directory:
 
 ```bash
-./packaging/build-release.sh 0.1.0 release
+./packaging/build-release.sh 0.1.2 build/release-dev
 ```
 
-The script creates one random 6-character hexadecimal build ID per invocation,
-appends it as SemVer build metadata, and embeds the same full version in every
-binary and package. For example, build ID `a1b2c3` produces:
+The version argument is required and must use `MAJOR.MINOR.PATCH` form, with
+an optional leading `v`. It is supplied by the caller, not inferred from a tag
+or source file. The script appends `-dev` and the first six hexadecimal
+characters of the current Git commit, then uses that same full version in every
+filename, executable, and Debian package. For example, commit `a1b2c3…` produces:
 
 ```text
-release/mnc-station_0.1.0+a1b2c3_linux_amd64.tar.gz
-release/mnc-station_0.1.0+a1b2c3_linux_arm64.tar.gz
-release/mnc-station_0.1.0+a1b2c3_amd64.deb
-release/mnc-station_0.1.0+a1b2c3_arm64.deb
-release/mnc-station_0.1.0+a1b2c3_windows_amd64.zip
+build/release-dev/mnc-station_0.1.2-dev+a1b2c3_linux_amd64.tar.gz
+build/release-dev/mnc-station_0.1.2-dev+a1b2c3_linux_arm64.tar.gz
+build/release-dev/mnc-station_0.1.2-dev+a1b2c3_amd64.deb
+build/release-dev/mnc-station_0.1.2-dev+a1b2c3_arm64.deb
+build/release-dev/mnc-station_0.1.2-dev+a1b2c3_windows_amd64.zip
 ```
 
-The `.deb` files are emitted when `dpkg-deb` is installed. The release version
-argument must use `MAJOR.MINOR.PATCH` form. Set `MNC_STATION_BUILD_ID` to 6–40
-hexadecimal characters when a repeatable build identifier is needed:
+The `.deb` files are emitted when `dpkg-deb` is installed. The output directory
+is the second argument: using `release` writes to `release/`, and using
+`build/release` writes to `build/release/`, both under the repository root.
+A build identifies `HEAD`; uncommitted changes do not alter its version suffix.
+
+Set `MNC_STATION_BUILD_ID` to 6–40 hexadecimal characters to retain the tagged
+release format `MAJOR.MINOR.PATCH+<build-id>` without `-dev`. The release workflow
+uses this override to share one commit identifier across all platforms:
 
 ```bash
 MNC_STATION_BUILD_ID=a1b2c3 \
-  ./packaging/build-release.sh 0.1.0 release
+  ./packaging/build-release.sh 0.1.2 release
 ```
 
-Six hexadecimal digits provide 16,777,216 possible identifiers. They are
-intended as a compact way to distinguish local builds, not as a monotonically
-increasing apt repository version. For an apt feed, provide an increasing
-numeric UTC identifier so newer builds always sort after older builds:
+Six hexadecimal digits identify a commit prefix, not build order. For an apt
+feed, provide an increasing numeric UTC identifier when newer builds of the
+same base version must sort after older builds:
 
 ```bash
 MNC_STATION_BUILD_ID="$(date -u +%Y%m%d%H%M%S)" \
-  ./packaging/build-release.sh 0.1.0 release
+  ./packaging/build-release.sh 0.1.2 release
 ```
 
 Before building, the script removes and recreates the output directory. For
@@ -213,9 +219,9 @@ steps run in the Windows GitHub Actions jobs.
 Inspect and install a Debian package locally:
 
 ```bash
-dpkg-deb --info release/mnc-station_0.1.0+a1b2c3_amd64.deb
-dpkg-deb --contents release/mnc-station_0.1.0+a1b2c3_amd64.deb
-sudo apt install ./release/mnc-station_0.1.0+a1b2c3_amd64.deb
+dpkg-deb --info build/release-dev/mnc-station_0.1.2-dev+a1b2c3_amd64.deb
+dpkg-deb --contents build/release-dev/mnc-station_0.1.2-dev+a1b2c3_amd64.deb
+sudo apt install ./build/release-dev/mnc-station_0.1.2-dev+a1b2c3_amd64.deb
 ```
 
 The package installs:
@@ -378,7 +384,7 @@ needed.
 
 ### `dpkg` reports that a newer local build is a downgrade
 
-Six-character Git or random hexadecimal IDs identify content but do not encode
+Six-character Git hexadecimal IDs identify content but do not encode
 build order. Debian compares the complete version string, so for example
 `0.0.1+08b762` sorts before `0.0.1+bf7649` regardless of which package was
 built later. This warning does not mean the package is corrupt.

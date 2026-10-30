@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 if (($# != 2)); then
     printf 'Usage: %s VERSION OUTPUT_DIR\n' "$0" >&2
-    printf 'Set MNC_STATION_BUILD_ID to override the generated build ID.\n' >&2
+    printf 'Default: VERSION-dev+<commit>; set MNC_STATION_BUILD_ID for VERSION+<build-id>.\n' >&2
     exit 2
 fi
 
@@ -16,9 +16,12 @@ OUTPUT_REQUEST="$2"
 }
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
+COMMIT="$(git -C "${PROJECT_ROOT}" rev-parse HEAD)"
 BUILD_ID="${MNC_STATION_BUILD_ID:-}"
+VERSION_SUFFIX=""
 if [[ -z "${BUILD_ID}" ]]; then
-    BUILD_ID="$(od -An -N3 -tx1 /dev/urandom | tr -d '[:space:]')"
+    BUILD_ID="${COMMIT:0:6}"
+    VERSION_SUFFIX="-dev"
 fi
 BUILD_ID="${BUILD_ID,,}"
 [[ "${BUILD_ID}" =~ ^[0-9a-f]{6,40}$ ]] || {
@@ -26,7 +29,7 @@ BUILD_ID="${BUILD_ID,,}"
         "${BUILD_ID}" >&2
     exit 2
 }
-RELEASE_VERSION="${VERSION}+${BUILD_ID}"
+RELEASE_VERSION="${VERSION}${VERSION_SUFFIX}+${BUILD_ID}"
 
 [[ -n "${OUTPUT_REQUEST}" && "${OUTPUT_REQUEST}" != *$'\n'* && \
    "${OUTPUT_REQUEST}" != *$'\r'* ]] || {
@@ -74,7 +77,6 @@ if [[ -e "${OUTPUT_DIR}" && ! -d "${OUTPUT_DIR}" ]]; then
 fi
 
 GO="${GO:-go}"
-COMMIT="$(git -C "${PROJECT_ROOT}" rev-parse HEAD)"
 BUILD_DATE="${SOURCE_DATE_EPOCH:+$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)}"
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 LDFLAGS="-s -w -X main.version=${RELEASE_VERSION} -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}"
@@ -106,6 +108,7 @@ for arch in amd64 arm64; do
     install -d -m 0755 "${root}/doc"
     install -m 0644 "${PROJECT_ROOT}/doc/README.md" \
         "${PROJECT_ROOT}/doc/BUILDING.md" \
+        "${PROJECT_ROOT}/doc/DEPLOYMENT_TASKS.md" \
         "${PROJECT_ROOT}/doc/SERIAL_CONSOLE.md" "${root}/doc/"
     install -d -m 0755 "${root}/api"
     install -m 0644 "${PROJECT_ROOT}/api/openapi.yaml" "${root}/api/"
@@ -128,6 +131,7 @@ install -m 0644 "${PROJECT_ROOT}/LICENSE" "${PROJECT_ROOT}/README.md" \
 install -d -m 0755 "${root}/doc"
 install -m 0644 "${PROJECT_ROOT}/doc/README.md" \
     "${PROJECT_ROOT}/doc/BUILDING.md" \
+    "${PROJECT_ROOT}/doc/DEPLOYMENT_TASKS.md" \
     "${PROJECT_ROOT}/doc/SERIAL_CONSOLE.md" "${root}/doc/"
 install -d -m 0755 "${root}/api"
 install -m 0644 "${PROJECT_ROOT}/api/openapi.yaml" "${root}/api/"
