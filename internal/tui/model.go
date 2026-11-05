@@ -663,7 +663,19 @@ func (m Model) View() tea.View {
 			body += "No jobs.\n"
 		}
 		if m.selectedJob != "" {
-			body += "Opened job: " + cleanLine(m.selectedJob) + "\n" + m.logViewer.View()
+			body += "Opened job: " + cleanLine(m.selectedJob) + "\n"
+			for _, job := range m.jobs {
+				if job.ID != m.selectedJob {
+					continue
+				}
+				if !job.ArtifactAvailable {
+					body += "Artifact unavailable. Reimport the original archive before provisioning again.\n"
+				}
+				if job.EventsTruncated {
+					body += "Event history truncated; only retained events are shown.\n"
+				}
+			}
+			body += m.logViewer.View()
 		}
 	}
 	footer := "\n" + cleanLine(m.status) + "\nCtrl+A artifacts · Ctrl+T targets · Ctrl+P provision · Ctrl+J jobs · Ctrl+C quit"

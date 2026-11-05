@@ -21,6 +21,7 @@ import (
 	"github.com/Monutchee/Provisioning-Station/internal/runner"
 	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
 	"github.com/Monutchee/Provisioning-Station/internal/statelock"
+	"github.com/Monutchee/Provisioning-Station/internal/storagebudget"
 	"github.com/Monutchee/Provisioning-Station/internal/tasks"
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
@@ -80,6 +81,11 @@ func Run(shutdownContext context.Context, config Config, ready func()) error {
 	if err != nil {
 		return err
 	}
+	if err := store.CleanStaging(); err != nil {
+		return err
+	}
+	budget := storagebudget.New(config.DataDir, storagebudget.DefaultLimit)
+	store.SetBudget(budget)
 	executor := xsdb.Executor{Path: config.XSDBPath}
 	consoleManager, err := serialconsole.New(serialconsole.Config{DefaultBaud: config.SerialBaud})
 	if err != nil {
@@ -103,6 +109,7 @@ func Run(shutdownContext context.Context, config Config, ready func()) error {
 		filepath.Join(config.DataDir, "jobs"), store, hardwareRunner,
 		jobs.WithSerialConsole(consoleManager, config.MaxConsoleLogBytes),
 		jobs.WithDeploymentTasks(taskRegistry),
+		jobs.WithStorageBudget(budget),
 	)
 	if err != nil {
 		return err

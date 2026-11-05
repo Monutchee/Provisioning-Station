@@ -31,3 +31,12 @@ func publishMetadata(temporary, path string) error {
 	}
 	return nil
 }
+
+func syncDirectory(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return f.Sync()
+}

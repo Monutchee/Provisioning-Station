@@ -22,6 +22,7 @@ import (
 
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
 	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
+	"github.com/Monutchee/Provisioning-Station/internal/storagebudget"
 	"github.com/Monutchee/Provisioning-Station/internal/tasks"
 )
 
@@ -63,6 +64,9 @@ func WithSerialConsole(service ConsoleService, maxLogBytes int64) ManagerOption 
 }
 
 type Manager struct {
+	budget             *storagebudget.Gate
+	expired            map[string]tombstone
+	eventBytes         map[string]int64
 	tasks              *tasks.Registry
 	root               string
 	artifacts          *artifact.Store
@@ -99,6 +103,8 @@ func OpenManager(root string, artifacts *artifact.Store, runner Runner, options 
 	managerContext, cancel := context.WithCancel(context.Background())
 	manager := &Manager{
 		root:        root,
+		expired:     make(map[string]tombstone),
+		eventBytes:  make(map[string]int64),
 		artifacts:   artifacts,
 		runner:      runner,
 		context:     managerContext,
@@ -119,7 +125,15 @@ func OpenManager(root string, artifacts *artifact.Store, runner Runner, options 
 			return nil, err
 		}
 	}
+	if err := manager.loadTombstones(); err != nil {
+		cancel()
+		return nil, err
+	}
 	if err := manager.load(); err != nil {
+		cancel()
+		return nil, err
+	}
+	if err := manager.initializeRetention(); err != nil {
 		cancel()
 		return nil, err
 	}
@@ -159,6 +173,10 @@ func (err *RequestConflictError) Error() string {
 // Validation failures are not recorded. An accepted ID is never enqueued again.
 func (manager *Manager) CreateSubmissionContext(ctx context.Context, request Request) (job Job, replay bool, err error) {
 	request = cloneRequest(request)
+	if manager.budget != nil {
+		manager.budget.Lock()
+		defer manager.budget.Unlock()
+	}
 	if request.RequestID != "" && !requestIDPattern.MatchString(request.RequestID) {
 		return Job{}, false, fmt.Errorf("requestId must contain 32 lowercase hexadecimal characters")
 	}
@@ -169,9 +187,16 @@ func (manager *Manager) CreateSubmissionContext(ctx context.Context, request Req
 	}
 	if request.RequestID != "" {
 		manager.mutex.RLock()
+		if t, ok := manager.expired[request.RequestID]; ok {
+			manager.mutex.RUnlock()
+			if t.Fingerprint != fingerprint(request) {
+				return Job{}, false, &RequestConflictError{request.RequestID}
+			}
+			return Job{}, false, &ExpiredSubmissionError{t.JobID}
+		}
 		id, exists := manager.submissions[request.RequestID]
 		if exists {
-			original := cloneJob(manager.jobs[id])
+			original := manager.inspectJob(manager.jobs[id])
 			manager.mutex.RUnlock()
 			a, _ := json.Marshal(original.Request)
 			b, _ := json.Marshal(request)
@@ -185,7 +210,18 @@ func (manager *Manager) CreateSubmissionContext(ctx context.Context, request Req
 	if manager.context.Err() != nil {
 		return Job{}, false, fmt.Errorf("station is shutting down")
 	}
+	if manager.budget != nil {
+		manager.budget.Pins[request.ArtifactID] = true
+		defer delete(manager.budget.Pins, request.ArtifactID)
+		if err := manager.budget.EnsureLocked(manager.outputReservation()); err != nil {
+			return Job{}, false, err
+		}
+	}
 	job, err = manager.createContext(ctx, request)
+	if manager.budget != nil && err == nil {
+		manager.budget.Reservations[job.ID] = manager.outputReservation()
+		manager.budget.Consumption[job.ID] = []string{filepath.Join(manager.root, job.ID, "job.json"), filepath.Join(manager.root, job.ID, "events.jsonl"), filepath.Join(manager.root, job.ID, serialTranscriptName)}
+	}
 	return job, false, err
 }
 
@@ -195,14 +231,38 @@ func (manager *Manager) Submission(requestID string) (Job, error) {
 	}
 	manager.mutex.RLock()
 	defer manager.mutex.RUnlock()
+	if t, ok := manager.expired[requestID]; ok {
+		return Job{}, &ExpiredSubmissionError{t.JobID}
+	}
 	id, ok := manager.submissions[requestID]
 	if !ok {
 		return Job{}, fmt.Errorf("submission was not found")
 	}
-	return cloneJob(manager.jobs[id]), nil
+	return manager.inspectJob(manager.jobs[id]), nil
 }
 
 func (manager *Manager) createContext(ctx context.Context, request Request) (Job, error) {
+	encoded, err := json.MarshalIndent(request, "", "  ")
+	if err != nil {
+		return Job{}, err
+	}
+	if len(encoded) > 256<<10 {
+		return Job{}, fmt.Errorf("job request exceeds 256 KiB metadata limit")
+	}
+	count := 0
+	for _, phase := range []string{tasks.BeforeBoot, tasks.OnSuccess, tasks.OnFailure, tasks.OnCancel} {
+		count += len(request.DeploymentTasks.Phase(phase))
+	}
+	if count > 128 {
+		return Job{}, fmt.Errorf("job exceeds 128 deployment tasks")
+	}
+	// All admissions share submissionMutex, so only the worker can change queue
+	// capacity after this check. Never wait on a full queue while holding Gate:
+	// completion must acquire Gate before the worker drains its next entry.
+	if len(manager.queue) >= cap(manager.queue) {
+		return Job{}, fmt.Errorf("job queue is full")
+	}
+
 	request = cloneRequest(request)
 	if err := manager.tasks.Validate(request.DeploymentTasks); err != nil {
 		return Job{}, err
@@ -266,7 +326,7 @@ func (manager *Manager) createContext(ctx context.Context, request Request) (Job
 	if request.RequestID != "" {
 		manager.submissions[request.RequestID] = id
 	}
-	result := cloneJob(job)
+	result := manager.inspectJob(job)
 	manager.mutex.Unlock()
 
 	select {
@@ -284,7 +344,7 @@ func (manager *Manager) Get(id string) (Job, error) {
 	if !ok {
 		return Job{}, fmt.Errorf("job %s was not found", id)
 	}
-	return cloneJob(job), nil
+	return manager.inspectJob(job), nil
 }
 
 func (manager *Manager) List() []Job {
@@ -292,13 +352,14 @@ func (manager *Manager) List() []Job {
 	defer manager.mutex.RUnlock()
 	result := make([]Job, 0, len(manager.jobs))
 	for _, job := range manager.jobs {
-		result = append(result, cloneJob(job))
+		result = append(result, manager.inspectJob(job))
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedUTC.After(result[j].CreatedUTC) })
 	return result
 }
 
 func (manager *Manager) Cancel(id string) (Job, error) {
+	defer manager.retentionAfterCompletion()
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
 	job, ok := manager.jobs[id]
@@ -306,7 +367,7 @@ func (manager *Manager) Cancel(id string) (Job, error) {
 		return Job{}, fmt.Errorf("job %s was not found", id)
 	}
 	if job.State.Terminal() {
-		return cloneJob(job), nil
+		return manager.inspectJob(job), nil
 	}
 	if cancel := manager.cancellers[id]; cancel != nil {
 		cancel()
@@ -317,7 +378,7 @@ func (manager *Manager) Cancel(id string) (Job, error) {
 		manager.emitLocked(job, "warning", "Job canceled before execution")
 		_ = manager.persistLocked(job)
 	}
-	return cloneJob(job), nil
+	return manager.inspectJob(job), nil
 }
 
 func (manager *Manager) Events(id string, after int) ([]Event, error) {
@@ -511,6 +572,7 @@ func (manager *Manager) run(id string) {
 			runErr = hookErr
 		}
 	}
+	defer manager.retentionAfterCompletion()
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
 	// Cancel shares this lock: honor a request accepted before terminal publication.
@@ -532,7 +594,7 @@ func (manager *Manager) run(id string) {
 		manager.emitLocked(job, "warning", "Job canceled")
 	case runErr != nil:
 		job.State = StateFailed
-		job.Error = runErr.Error()
+		job.Error = boundedText(runErr.Error(), 8192)
 		manager.emitLocked(job, "error", "Job failed: "+runErr.Error())
 	default:
 		job.State = StateSucceeded
@@ -552,12 +614,28 @@ func (manager *Manager) emit(id, level, message string) {
 }
 
 func (manager *Manager) emitLocked(job *Job, level, message string) {
+	if len(message) > 16384 {
+		message = message[:16384] + " [truncated]"
+		job.EventsTruncated = true
+	}
+	if manager.eventBytes[job.ID] >= eventLimitBytes {
+		job.EventsTruncated = true
+		if !job.State.Terminal() {
+			return
+		}
+		if len(message) > 2048 {
+			message = message[:2048] + " [truncated]"
+		}
+	}
+
 	event := Event{
-		Sequence: len(manager.events[job.ID]) + 1,
+		Sequence: job.EventCount + 1,
 		Time:     time.Now().UTC(),
 		Level:    level,
 		Message:  message,
 	}
+	encoded, _ := json.Marshal(event)
+	manager.eventBytes[job.ID] += int64(len(encoded) + 1)
 	manager.events[job.ID] = append(manager.events[job.ID], event)
 	job.EventCount = event.Sequence
 	_ = manager.appendEventLocked(job.ID, event)
@@ -602,6 +680,15 @@ func (manager *Manager) load() error {
 		if err := decoder.Decode(new(any)); err != io.EOF {
 			return fmt.Errorf("invalid trailing data in published job %s", id)
 		}
+		if t, ok := manager.expired[job.Request.RequestID]; ok {
+			if t.JobID != id || t.Fingerprint != fingerprint(job.Request) {
+				return fmt.Errorf("submission tombstone does not match job %s", id)
+			}
+			if err := manager.removeKnownJob(id); err != nil {
+				return err
+			}
+			continue
+		}
 		if job.Request.RequestID != "" {
 			if !requestIDPattern.MatchString(job.Request.RequestID) {
 				return fmt.Errorf("invalid requestId in published job %s", id)
@@ -611,9 +698,20 @@ func (manager *Manager) load() error {
 			}
 			manager.submissions[job.Request.RequestID] = id
 		}
+		if err := manager.boundHistoricalOutput(&job); err != nil {
+			return err
+		}
 		manager.jobs[id] = &job
 		manager.events[id] = manager.loadEvents(id)
-		job.EventCount = len(manager.events[id])
+		if info, err := os.Stat(filepath.Join(manager.root, id, "events.jsonl")); err == nil {
+			manager.eventBytes[id] = info.Size()
+		}
+		job.EventCount = 0
+		for _, event := range manager.events[id] {
+			if event.Sequence > job.EventCount {
+				job.EventCount = event.Sequence
+			}
+		}
 		if job.State == StateQueued || job.State == StateRunning {
 			now := time.Now().UTC()
 			job.State = StateFailed
@@ -664,9 +762,20 @@ func (manager *Manager) loadEvents(id string) []Event {
 }
 
 func (manager *Manager) persistLocked(job *Job) error {
+	job.Error = boundedText(job.Error, 2048)
+	job.DeploymentError = boundedText(job.DeploymentError, 2048)
+	if len(job.TaskErrors) > 16 {
+		job.TaskErrors = job.TaskErrors[:16]
+	}
+	for i := range job.TaskErrors {
+		job.TaskErrors[i] = boundedText(job.TaskErrors[i], 2048)
+	}
 	data, err := json.MarshalIndent(job, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode job: %w", err)
+	}
+	if manager.budget != nil && len(data)+1 > metadataReserve/2 {
+		return fmt.Errorf("job metadata exceeds reserved 2 MiB record limit")
 	}
 	data = append(data, '\n')
 	path := filepath.Join(manager.root, job.ID, "job.json")
@@ -738,4 +847,11 @@ func (manager *Manager) runTaskPhase(ctx context.Context, id string, request Req
 		manager.emitLocked(job, "info", fmt.Sprintf("Task %s (%s) %s", result.ID, result.Phase, result.State))
 		_ = manager.persistLocked(job)
 	})
+}
+
+func boundedText(s string, n int) string {
+	if len(s) > n {
+		return s[:n] + " [truncated]"
+	}
+	return s
 }

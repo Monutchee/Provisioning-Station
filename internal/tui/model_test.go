@@ -221,3 +221,15 @@ func TestPasteRoutesToFocusedInputsAndInvalidatesDiscovery(t *testing.T) {
 		t.Fatal("import paste dropped")
 	}
 }
+
+func TestOpenedJobExplainsPrunedArtifactAndEvents(t *testing.T) {
+	m := configured(t, func(*http.Request) (*http.Response, error) { t.Fatal("unexpected HTTP request"); return nil, nil })
+	m.tab = jobsTab
+	m.height = 60
+	m.jobs = []jobs.Job{{ID: "retained-job", State: jobs.StateSucceeded, ArtifactAvailable: false, EventsTruncated: true}}
+	m.selectedJob = "retained-job"
+	view := m.View().Content
+	if !strings.Contains(view, "Artifact unavailable") || !strings.Contains(view, "Reimport") || !strings.Contains(view, "Event history truncated") {
+		t.Fatal(view)
+	}
+}

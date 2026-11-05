@@ -119,12 +119,27 @@ mps target list
 mps job submit --request /path/to/job.json --acknowledge-reset --request-id 0123456789abcdef0123456789abcdef
 mps job reconcile 0123456789abcdef0123456789abcdef
 mps job logs --follow JOB_ID
+mps storage status
+mps storage cleanup --dry-run
+mps storage cleanup --apply
 ```
 
 A submission must name an explicit target. Hardware reset acknowledgement is
 required. Request IDs are 32 lowercase hexadecimal characters; the client
 generates and prints one before submitting when omitted. Reconcile uncertain
 submissions with that same request ID.
+
+The station retains the latest 30 completed job histories plus active jobs. Its
+10 GiB active state budget counts logical file bytes, including import staging,
+and reserves space for active job output and terminal metadata. Pre-existing
+protected or unknown state can exceed the budget; the station reports this and
+rejects further growth until space is available. `mps storage status` reports
+used, reserved, available, and unknown bytes plus external recovery locations.
+Automatic cleanup runs at startup, job completion, and before growth. Manual
+cleanup requires an explicit `--dry-run` preview or `--apply` deletion. Historical jobs can remain visible
+after their artifact payload is reclaimed; reimport the original archive to
+provision again. Truncated event history is marked in job inspection. Legacy
+installations should follow [the cleanup and migration guide](doc/MIGRATION.md).
 
 `mps mcp` serves MCP over stdio with the same explicit workflow. It never
 starts a service automatically. Client disconnects do not cancel jobs; cancel

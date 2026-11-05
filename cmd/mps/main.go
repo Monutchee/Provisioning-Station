@@ -30,6 +30,7 @@ const usage = `Usage: mps [--url URL] [--token TOKEN | --token-file FILE] COMMAN
   tui                              Interactive station console (terminal default)
   service start|stop|status         Manage the installed machine service
   artifact import PATH|list|inspect ID
+  storage status|cleanup (--dry-run|--apply)
   target list [--hw-server-url URL]
   job submit --request FILE --acknowledge-reset [--request-id KEY]
   job list|inspect ID|cancel ID|reconcile REQUEST_ID
@@ -159,7 +160,7 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, dep dependen
 		return err
 	}
 	switch args[0] {
-	case "tui", "status", "artifact", "target", "job", "serial":
+	case "tui", "status", "artifact", "target", "job", "serial", "storage":
 	default:
 		return fmt.Errorf("unknown command %q\n%s", args[0], usage)
 	}
@@ -191,6 +192,8 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, dep dependen
 			return err
 		}
 		return printJSON(out, value)
+	case "storage":
+		return storageCommand(ctx, client, args[1:], out, errOut)
 	case "artifact":
 		return artifactCommand(ctx, client, args[1:], out)
 	case "target":
@@ -417,4 +420,31 @@ func env(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func storageCommand(ctx context.Context, c *stationclient.Client, args []string, out, errOut io.Writer) error {
+	if len(args) == 1 && args[0] == "status" {
+		value, err := c.Storage(ctx)
+		if err != nil {
+			return err
+		}
+		return printJSON(out, value)
+	}
+	if len(args) == 0 || args[0] != "cleanup" {
+		return errors.New("use storage status or storage cleanup (--dry-run|--apply)")
+	}
+	f := commandFlags("storage cleanup", errOut)
+	dryRun := f.Bool("dry-run", false, "preview eligible jobs/artifacts and reclaimable bytes")
+	apply := f.Bool("apply", false, "delete eligible historical jobs and artifact payloads")
+	if err := f.Parse(args[1:]); err != nil {
+		return err
+	}
+	if f.NArg() != 0 || *dryRun == *apply {
+		return errors.New("storage cleanup requires exactly one of --dry-run or --apply")
+	}
+	value, err := c.CleanupStorage(ctx, *apply)
+	if err != nil {
+		return err
+	}
+	return printJSON(out, value)
 }

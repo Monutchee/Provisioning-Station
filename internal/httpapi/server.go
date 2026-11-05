@@ -20,6 +20,7 @@ import (
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
 	"github.com/Monutchee/Provisioning-Station/internal/jobs"
 	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
+	"github.com/Monutchee/Provisioning-Station/internal/storagebudget"
 	"github.com/Monutchee/Provisioning-Station/internal/webui"
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
@@ -78,6 +79,8 @@ func New(config Config, artifacts *artifact.Store, jobManager *jobs.Manager) (*S
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", server.health)
 	mux.Handle("GET /api/v1/capabilities", server.authorize(http.HandlerFunc(server.capabilities)))
+	mux.Handle("GET /api/v1/storage", server.authorize(http.HandlerFunc(server.storageStatus)))
+	mux.Handle("POST /api/v1/storage/cleanup", server.authorize(http.HandlerFunc(server.cleanupStorage)))
 	mux.Handle("GET /api/v1/artifacts", server.authorize(http.HandlerFunc(server.listArtifacts)))
 	mux.Handle("POST /api/v1/artifacts", server.authorize(http.HandlerFunc(server.importArtifact)))
 	mux.Handle("GET /api/v1/artifacts/{id}", server.authorize(http.HandlerFunc(server.getArtifact)))
@@ -230,6 +233,10 @@ func (server *Server) importArtifact(response http.ResponseWriter, request *http
 		part.Close()
 		if err != nil {
 			status := http.StatusBadRequest
+			if errors.Is(err, storagebudget.ErrFull) {
+				writeError(response, http.StatusInsufficientStorage, "storage_full", err.Error())
+				return
+			}
 			if strings.Contains(err.Error(), "compressed size limit") || strings.Contains(err.Error(), "request body too large") {
 				status = http.StatusRequestEntityTooLarge
 			}
@@ -266,6 +273,15 @@ func (server *Server) createJob(response http.ResponseWriter, request *http.Requ
 	}
 	job, replay, err := server.jobs.CreateSubmissionContext(request.Context(), jobRequest)
 	if err != nil {
+		if errors.Is(err, storagebudget.ErrFull) {
+			writeError(response, http.StatusInsufficientStorage, "storage_full", err.Error())
+			return
+		}
+		var expired *jobs.ExpiredSubmissionError
+		if errors.As(err, &expired) {
+			writeError(response, http.StatusGone, "submission_expired", err.Error())
+			return
+		}
 		var conflict *jobs.RequestConflictError
 		if errors.As(err, &conflict) {
 			writeError(response, http.StatusConflict, "request_conflict", err.Error())
@@ -286,6 +302,11 @@ func (server *Server) getSubmission(response http.ResponseWriter, request *http.
 	id := request.PathValue("id")
 	job, err := server.jobs.Submission(id)
 	if err != nil {
+		var expired *jobs.ExpiredSubmissionError
+		if errors.As(err, &expired) {
+			writeError(response, http.StatusGone, "submission_expired", err.Error())
+			return
+		}
 		writeError(response, http.StatusNotFound, "submission_not_found", err.Error())
 		return
 	}
@@ -484,4 +505,28 @@ func securityHeaders(next http.Handler) http.Handler {
 		response.Header().Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(response, request)
 	})
+}
+
+func (s *Server) storageStatus(w http.ResponseWriter, r *http.Request) {
+	status, err := s.jobs.StorageStatus()
+	if err != nil {
+		writeError(w, 500, "storage_status_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, status)
+}
+func (s *Server) cleanupStorage(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Apply bool `json:"apply"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	result, err := s.jobs.Cleanup(in.Apply)
+	if err != nil {
+		writeError(w, 500, "storage_cleanup_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, result)
 }

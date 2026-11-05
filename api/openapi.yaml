@@ -38,6 +38,66 @@ paths:
                 $ref: "#/components/schemas/Capabilities"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /storage:
+    get:
+      summary: Inspect active state storage and recovery copies
+      description: Recovery locations are reported separately and never included in the active state budget or removed automatically.
+      responses:
+        "200":
+          description: Current logical file bytes, reservations and retention counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/StorageFailure"
+  /storage/cleanup:
+    post:
+      summary: Preview or apply active state retention
+      description: Keep the latest 30 completed jobs and all active jobs. Unknown files and recovery copies are never deleted. Firmware for completed jobs can expire under storage pressure; accepted request IDs remain durable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                apply:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Selected records and actual current storage status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/StorageStatus"
+                  - type: object
+                    required: [apply, jobIds, artifactIds, reclaimableBytes]
+                    properties:
+                      apply:
+                        type: boolean
+                      jobIds:
+                        type: array
+                        items:
+                          type: string
+                      artifactIds:
+                        type: array
+                        items:
+                          type: string
+                      reclaimableBytes:
+                        type: integer
+                        format: int64
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/StorageFailure"
   /artifacts:
     get:
       summary: List imported artifacts
@@ -68,6 +128,8 @@ paths:
                   type: string
                   format: binary
       responses:
+        "507":
+          $ref: "#/components/responses/StorageFull"
         "201":
           description: Verified content-addressed artifact
           content:
@@ -222,6 +284,10 @@ paths:
             schema:
               $ref: "#/components/schemas/JobRequest"
       responses:
+        "410":
+          $ref: "#/components/responses/SubmissionExpired"
+        "507":
+          $ref: "#/components/responses/StorageFull"
         "200":
           description: Replayed original job for an identical accepted request ID
           content:
@@ -258,6 +324,8 @@ paths:
       summary: Reconcile an accepted job submission without resubmitting
       description: A missing record does not prove another in-flight submission has finished. Retry only with the same request ID and payload.
       responses:
+        "410":
+          $ref: "#/components/responses/SubmissionExpired"
         "200":
           description: Original accepted job, including its current state
           content:
@@ -389,6 +457,25 @@ components:
       schema:
         type: string
   responses:
+    SubmissionExpired:
+      description: Previously accepted request history expired. This request ID will never execute again. A different payload with the same ID returns 409.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    StorageFull:
+      description: Protected state and reservations prevent growth within the 10 GiB active state budget.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    StorageFailure:
+      description: State inspection or safe cleanup failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
     Unauthorized:
       description: Missing or invalid bearer token
       content:
@@ -408,6 +495,47 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
   schemas:
+    StorageStatus:
+      type: object
+      required: [limitBytes, usedBytes, reservedBytes, availableBytes, unknownBytes, overBudget, completedJobLimit, completedJobs, activeJobs, recoveryLocations]
+      properties:
+        limitBytes:
+          type: integer
+          format: int64
+        usedBytes:
+          type: integer
+          format: int64
+        reservedBytes:
+          type: integer
+          format: int64
+        availableBytes:
+          type: integer
+          format: int64
+        unknownBytes:
+          type: integer
+          format: int64
+        overBudget:
+          type: boolean
+        completedJobLimit:
+          const: 30
+        completedJobs:
+          type: integer
+        activeJobs:
+          type: integer
+        recoveryLocations:
+          type: array
+          items:
+            type: object
+            required: [path, bytes]
+            properties:
+              path:
+                type: string
+              bytes:
+                type: integer
+                format: int64
+              inaccessible:
+                type: boolean
+
     Health:
       type: object
       required: [status, version, apiVersion, time]
@@ -817,8 +945,15 @@ components:
                 currently enumerated tty/COM port without asserting a pairing.
     Job:
       type: object
-      required: [id, request, state, createdUtc, eventCount]
+      required: [id, request, state, createdUtc, eventCount, artifactAvailable]
       properties:
+        artifactAvailable:
+          type: boolean
+          description: Whether the referenced firmware remains in local storage. Completed job firmware may expire under storage pressure.
+        eventsTruncated:
+          type: boolean
+          description: Event output exceeded retention limits; terminal job metadata remains available.
+
         deploymentError:
           type: string
           description: Primary deployment error retained even if outcome tasks are canceled.

@@ -10,10 +10,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/Monutchee/Provisioning-Station/internal/storagebudget"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -38,6 +40,7 @@ type Store struct {
 	artifacts string
 	temporary string
 	limits    Limits
+	budget    *storagebudget.Gate
 }
 
 func OpenStore(root string, limits Limits) (*Store, error) {
@@ -62,7 +65,15 @@ func OpenStore(root string, limits Limits) (*Store, error) {
 	return store, nil
 }
 
+// SetBudget is called before exposing the store to concurrent operations.
+func (store *Store) SetBudget(g *storagebudget.Gate) { store.budget = g }
+
 func (store *Store) Import(ctx context.Context, source io.Reader) (StoredArtifact, error) {
+	if store.budget != nil {
+		store.budget.Lock()
+		defer store.budget.Unlock()
+	}
+
 	upload, err := os.CreateTemp(store.temporary, ".upload-*.tar.gz")
 	if err != nil {
 		return StoredArtifact{}, fmt.Errorf("create temporary upload: %w", err)
@@ -72,7 +83,7 @@ func (store *Store) Import(ctx context.Context, source io.Reader) (StoredArtifac
 
 	digest := sha256.New()
 	limited := &io.LimitedReader{R: source, N: store.limits.MaxCompressedBytes + 1}
-	written, copyErr := io.Copy(io.MultiWriter(upload, digest), limited)
+	written, copyErr := io.Copy(store.budgetWriter(io.MultiWriter(upload, digest)), limited)
 	closeErr := upload.Close()
 	if copyErr != nil {
 		return StoredArtifact{}, fmt.Errorf("store artifact upload: %w", copyErr)
@@ -97,7 +108,7 @@ func (store *Store) Import(ctx context.Context, source io.Reader) (StoredArtifac
 	}
 	defer os.RemoveAll(staging)
 	payloadRoot := filepath.Join(staging, "payload")
-	extraction, err := ValidateAndExtract(ctx, uploadPath, payloadRoot, store.limits)
+	extraction, err := validateAndExtract(ctx, uploadPath, payloadRoot, store.limits, store.ensureGrowth)
 	if err != nil {
 		return StoredArtifact{}, err
 	}
@@ -113,6 +124,11 @@ func (store *Store) Import(ctx context.Context, source io.Reader) (StoredArtifac
 		UncompressedBytes: extraction.UncompressedBytes,
 		HasSignature:      extraction.HasSignature,
 		Manifest:          extraction.Manifest,
+	}
+	if data, err := json.MarshalIndent(record, "", "  "); err != nil {
+		return StoredArtifact{}, err
+	} else if err := store.ensureGrowth(int64(len(data)) + 1); err != nil {
+		return StoredArtifact{}, err
 	}
 	if err := writeJSON(filepath.Join(staging, metadataFilename), record); err != nil {
 		return StoredArtifact{}, err
@@ -144,6 +160,18 @@ func (store *Store) Load(id string) (StoredArtifact, error) {
 		return StoredArtifact{}, fmt.Errorf("artifact ID must be a SHA-256 digest")
 	}
 	directory := filepath.Join(store.artifacts, id)
+	for _, item := range []struct {
+		name      string
+		directory bool
+	}{{"", true}, {"payload", true}, {"artifact.tar.gz", false}, {metadataFilename, false}} {
+		info, err := os.Lstat(filepath.Join(directory, item.name))
+		if err != nil {
+			return StoredArtifact{}, fmt.Errorf("artifact %s was not found", id)
+		}
+		if (item.directory && !info.IsDir()) || (!item.directory && !info.Mode().IsRegular()) {
+			return StoredArtifact{}, fmt.Errorf("unsafe stored artifact path")
+		}
+	}
 	data, err := os.ReadFile(filepath.Join(directory, metadataFilename))
 	if err != nil {
 		return StoredArtifact{}, fmt.Errorf("artifact %s was not found", id)
@@ -355,4 +383,141 @@ func writeJSON(path string, value any) error {
 		return fmt.Errorf("write artifact metadata: %w", err)
 	}
 	return nil
+}
+
+func (store *Store) ensureGrowth(n int64) error {
+	if store.budget == nil {
+		return nil
+	}
+	return store.budget.EnsureLocked(n)
+}
+
+type checkedWriter struct {
+	io.Writer
+	check  func(int64) error
+	credit int64
+}
+
+func (w *checkedWriter) Write(p []byte) (int, error) {
+	if int64(len(p)) > w.credit {
+		n := int64(4 << 20)
+		if n < int64(len(p)) {
+			n = int64(len(p))
+		}
+		if err := w.check(n); err != nil {
+			if err = w.check(int64(len(p))); err != nil {
+				return 0, err
+			}
+			n = int64(len(p))
+		}
+		w.credit = n
+	}
+	n, err := w.Writer.Write(p)
+	w.credit -= int64(n)
+	return n, err
+}
+func (store *Store) budgetWriter(w io.Writer) io.Writer {
+	return &checkedWriter{Writer: w, check: store.ensureGrowth}
+}
+
+// Remove deletes only a validated content-addressed artifact directory. Callers
+// coordinate this with admission and imports using the shared budget gate.
+func (store *Store) Remove(id string) error {
+	if !sha256Pattern.MatchString(id) {
+		return fmt.Errorf("invalid artifact ID")
+	}
+	_, safe, err := store.OwnedSize(id)
+	if err != nil {
+		return err
+	}
+	if !safe {
+		return fmt.Errorf("artifact contains unknown state")
+	}
+	// Publish deletion intent atomically before unlinking any payload. A crash
+	// can leave only owned deletion staging, never a half-deleted SHA directory.
+	marker, err := os.CreateTemp(store.artifacts, ".delete-"+id+"-")
+	if err != nil {
+		return err
+	}
+	staging := marker.Name()
+	if err := marker.Close(); err != nil {
+		return err
+	}
+	if err := os.Remove(staging); err != nil {
+		return err
+	}
+	if err := moveToDeletionStage(filepath.Join(store.artifacts, id), staging); err != nil {
+		return err
+	}
+	return os.RemoveAll(staging)
+}
+func (store *Store) Directory(id string) string { return filepath.Join(store.artifacts, id) }
+
+// CleanStaging is startup-only, under the daemon's exclusive state lock.
+func (store *Store) CleanStaging() error {
+	for _, spec := range []struct{ dir, pattern string }{{store.temporary, `^\.upload-[0-9]+\.tar\.gz$`}, {store.artifacts, `^\.(import-[0-9]+|delete-[0-9a-f]{64}-[0-9]+)$`}} {
+		re := regexp.MustCompile(spec.pattern)
+		entries, err := os.ReadDir(spec.dir)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if re.MatchString(e.Name()) {
+				if err := os.RemoveAll(filepath.Join(spec.dir, e.Name())); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// OwnedSize refuses deletion if a validated artifact directory has acquired an
+// unknown file, link or special entry. Unknown state is counted, never deleted.
+func (store *Store) OwnedSize(id string) (int64, bool, error) {
+	a, err := store.Load(id)
+	if err != nil {
+		return 0, false, err
+	}
+	allowed := map[string]bool{metadataFilename: true, "artifact.tar.gz": true, "payload/" + ManifestName: true}
+	if a.HasSignature {
+		allowed["payload/"+SignatureName] = true
+	}
+	for path := range a.Manifest.Files {
+		allowed["payload/"+path] = true
+	}
+	dirs := map[string]bool{".": true, "payload": true}
+	for p := range allowed {
+		for d := filepath.ToSlash(filepath.Dir(p)); d != "."; d = filepath.ToSlash(filepath.Dir(d)) {
+			dirs[d] = true
+		}
+	}
+	var size int64
+	safe := true
+	err = filepath.WalkDir(store.Directory(id), func(path string, e os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(store.Directory(id), path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if e.IsDir() {
+			if !dirs[rel] {
+				safe = false
+			}
+			return nil
+		}
+		info, err := e.Info()
+		if err != nil {
+			return err
+		}
+		if !allowed[rel] || !info.Mode().IsRegular() {
+			safe = false
+		}
+		size += info.Size()
+		return nil
+	})
+	return size, safe, err
 }

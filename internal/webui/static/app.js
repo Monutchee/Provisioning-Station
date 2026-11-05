@@ -410,7 +410,11 @@ function renderJobs() {
   elements["job-state"].className = `job-state ${job.state}`;
   elements["job-title"].textContent = artifact?.manifest?.artifact?.name || "JTAG boot";
   const target = job.request.targetId ? ` · target ${job.request.targetId}` : "";
-  elements["job-meta"].textContent = `${job.request.hwServerUrl}${target} · ${formatTime(job.createdUtc)}`;
+  const retention = [
+    job.artifactAvailable === false ? "Artifact unavailable; reimport the original archive before provisioning again." : "",
+    job.eventsTruncated ? "Event history truncated; only retained events are shown." : "",
+  ].filter(Boolean).join(" ");
+  elements["job-meta"].textContent = `${job.request.hwServerUrl}${target} · ${formatTime(job.createdUtc)}${retention ? ` · ${retention}` : ""}`;
   elements["cancel-button"].classList.toggle("hidden", ["succeeded", "failed", "canceled"].includes(job.state));
   elements["console-transcript"].classList.toggle("hidden", !job.serialCapture);
   scheduleJobRefresh(job);

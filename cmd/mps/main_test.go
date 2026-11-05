@@ -154,3 +154,39 @@ func TestBoundedJobLogCursor(t *testing.T) {
 		t.Fatal(err, out.String())
 	}
 }
+
+func TestStorageCleanupRequiresExplicitMode(t *testing.T) {
+	for _, args := range [][]string{{"cleanup"}, {"cleanup", "--apply", "--dry-run"}, {"cleanup", "--apply", "extra"}} {
+		calls := 0
+		client, err := stationclient.New(stationclient.Config{URL: "http://127.0.0.1:8042", HTTPClient: &http.Client{Transport: trip(func(*http.Request) (*http.Response, error) { calls++; return readyResponse(), nil })}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := storageCommand(context.Background(), client, args, io.Discard, io.Discard); err == nil || calls != 0 {
+			t.Fatal(args, err, calls)
+		}
+	}
+	for _, mode := range []string{"--dry-run", "--apply"} {
+		clearEnv(t)
+		var out bytes.Buffer
+		calls := 0
+		dep := dependencies{http: &http.Client{Transport: trip(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path == "/api/v1/capabilities" {
+				return readyResponse(), nil
+			}
+			calls++
+			data, _ := io.ReadAll(r.Body)
+			expected := `{"apply":false}`
+			if mode == "--apply" {
+				expected = `{"apply":true}`
+			}
+			if r.Method != "POST" || r.URL.Path != "/api/v1/storage/cleanup" || string(data) != expected {
+				t.Fatal(r.Method, r.URL, string(data))
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"apply":false,"reclaimableBytes":12}`))}, nil
+		})}}
+		if err := run(context.Background(), []string{"storage", "cleanup", mode}, &out, &out, dep); err != nil || calls != 1 || !strings.Contains(out.String(), "reclaimableBytes") {
+			t.Fatal(err, calls, out.String())
+		}
+	}
+}

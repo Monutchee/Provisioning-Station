@@ -16,3 +16,6 @@ func publishMetadata(temporary, path string) error {
 	}
 	return windows.MoveFileEx(source, destination, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 }
+
+// MoveFileEx WRITE_THROUGH handles publication durability on Windows.
+func syncDirectory(path string) error { return nil }

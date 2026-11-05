@@ -59,6 +59,8 @@ type SerialCapture struct {
 }
 
 type Job struct {
+	ArtifactAvailable bool           `json:"artifactAvailable"`
+	EventsTruncated   bool           `json:"eventsTruncated,omitempty"`
 	TaskResults       []tasks.Result `json:"taskResults,omitempty"`
 	DeploymentError   string         `json:"deploymentError,omitempty"`
 	DeploymentOutcome string         `json:"deploymentOutcome,omitempty"`

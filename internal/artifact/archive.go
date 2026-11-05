@@ -43,6 +43,10 @@ type Extraction struct {
 }
 
 func ValidateAndExtract(ctx context.Context, archivePath, destination string, limits Limits) (Extraction, error) {
+	return validateAndExtract(ctx, archivePath, destination, limits, nil)
+}
+
+func validateAndExtract(ctx context.Context, archivePath, destination string, limits Limits, grow func(int64) error) (Extraction, error) {
 	if err := validateLimits(limits); err != nil {
 		return Extraction{}, err
 	}
@@ -137,6 +141,11 @@ func ValidateAndExtract(ctx context.Context, archivePath, destination string, li
 			orderedPayload = append(orderedPayload, name)
 		}
 
+		if grow != nil {
+			if err := grow(header.Size); err != nil {
+				return Extraction{}, err
+			}
+		}
 		target := filepath.Join(destination, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return Extraction{}, fmt.Errorf("create parent for %q: %w", name, err)

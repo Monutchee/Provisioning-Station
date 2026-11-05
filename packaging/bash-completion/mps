@@ -3,7 +3,11 @@
 _mps() {
     local current="${COMP_WORDS[COMP_CWORD]}"
     if ((COMP_CWORD == 1)); then
-        COMPREPLY=( $(compgen -W 'status target artifact job serial tui service mcp version help' -- "$current") )
+        COMPREPLY=( $(compgen -W 'status target artifact job serial storage tui service mcp version help' -- "$current") )
+    elif [[ "${COMP_WORDS[1]}" == storage ]] && ((COMP_CWORD == 2)); then
+        COMPREPLY=( $(compgen -W 'status cleanup' -- "$current") )
+    elif [[ "${COMP_WORDS[1]}" == storage && "${COMP_WORDS[2]}" == cleanup ]]; then
+        COMPREPLY=( $(compgen -W '--dry-run --apply' -- "$current") )
     else
         COMPREPLY=()
     fi

@@ -26,6 +26,7 @@ import (
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
 	"github.com/Monutchee/Provisioning-Station/internal/jobs"
 	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
+	"github.com/Monutchee/Provisioning-Station/internal/storagebudget"
 	"github.com/Monutchee/Provisioning-Station/internal/tasks"
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
 )
@@ -299,17 +300,49 @@ func (c *Client) Targets(ctx context.Context, hwServerURL string) ([]Target, err
 	err := c.json(ctx, "GET", "/api/v1/xilinx/targets", url.Values{"hwServerUrl": {hwServerURL}}, nil, &out)
 	return out.Targets, err
 }
+
+// jobResponse defaults availability for servers predating this optional field.
+// An explicit false from a retention-aware server remains false.
+type jobResponse jobs.Job
+
+func (job *jobResponse) UnmarshalJSON(data []byte) error {
+	type plain jobResponse
+	value := plain{ArtifactAvailable: true}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*job = jobResponse(value)
+	return nil
+}
+
+func (c *Client) Storage(ctx context.Context) (out storagebudget.Status, err error) {
+	err = c.json(ctx, "GET", "/api/v1/storage", nil, nil, &out)
+	return
+}
+
+func (c *Client) CleanupStorage(ctx context.Context, apply bool) (out jobs.CleanupResult, err error) {
+	err = c.json(ctx, "POST", "/api/v1/storage/cleanup", nil, struct {
+		Apply bool `json:"apply"`
+	}{apply}, &out)
+	return
+}
+
 func (c *Client) ListJobs(ctx context.Context) ([]jobs.Job, error) {
 	var out struct {
-		Jobs []jobs.Job `json:"jobs"`
+		Jobs []jobResponse `json:"jobs"`
 	}
 	err := c.json(ctx, "GET", "/api/v1/jobs", nil, nil, &out)
-	return out.Jobs, err
+	result := make([]jobs.Job, len(out.Jobs))
+	for index, job := range out.Jobs {
+		result[index] = jobs.Job(job)
+	}
+	return result, err
 }
 func (c *Client) GetJob(ctx context.Context, id string) (out jobs.Job, err error) {
 	if err = validID(id, 32); err != nil {
 		return
 	}
+	out.ArtifactAvailable = true
 	err = c.json(ctx, "GET", "/api/v1/jobs/"+id, nil, nil, &out)
 	return
 }
@@ -317,6 +350,7 @@ func (c *Client) Submit(ctx context.Context, request jobs.Request) (out jobs.Job
 	if err = validID(request.RequestID, 32); err != nil {
 		return out, errors.New("Submit requires a retained 32-character lowercase hexadecimal requestId")
 	}
+	out.ArtifactAvailable = true
 	err = c.json(ctx, "POST", "/api/v1/jobs", nil, request, &out)
 	return
 }
@@ -324,6 +358,7 @@ func (c *Client) Submission(ctx context.Context, id string) (out Submission, err
 	if err = validID(id, 32); err != nil {
 		return
 	}
+	out.Job.ArtifactAvailable = true
 	err = c.json(ctx, "GET", "/api/v1/submissions/"+id, nil, nil, &out)
 	return
 }
@@ -344,6 +379,7 @@ func (c *Client) Cancel(ctx context.Context, id string) (out jobs.Job, err error
 	if err = validID(id, 32); err != nil {
 		return
 	}
+	out.ArtifactAvailable = true
 	err = c.json(ctx, "POST", "/api/v1/jobs/"+id+"/cancel", nil, nil, &out)
 	return
 }

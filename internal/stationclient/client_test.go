@@ -185,3 +185,68 @@ func TestStreamingMultipartAndTranscript(t *testing.T) {
 		t.Fatal(out, e)
 	}
 }
+
+func TestStorageEndpointsAndExplicitAvailability(t *testing.T) {
+	c := clientFor(t, func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/api/v1/storage":
+			if r.Method != "GET" {
+				t.Fatal(r.Method)
+			}
+			return response(200, `{"limitBytes":10737418240,"usedBytes":7,"completedJobLimit":30}`), nil
+		case "/api/v1/storage/cleanup":
+			data, _ := io.ReadAll(r.Body)
+			if r.Method != "POST" || string(data) != `{"apply":false}` {
+				t.Fatal(r.Method, string(data))
+			}
+			return response(200, `{"apply":false,"jobIds":["old"],"reclaimableBytes":9}`), nil
+		case "/api/v1/jobs":
+			return response(200, `{"jobs":[{"id":"legacy"},{"id":"expired","artifactAvailable":false,"eventsTruncated":true}]}`), nil
+		default:
+			return response(200, `{"artifactAvailable":false}`), nil
+		}
+	})
+	status, err := c.Storage(context.Background())
+	if err != nil || status.LimitBytes != 10<<30 || status.UsedBytes != 7 {
+		t.Fatal(status, err)
+	}
+	result, err := c.CleanupStorage(context.Background(), false)
+	if err != nil || result.Apply || result.ReclaimableBytes != 9 {
+		t.Fatal(result, err)
+	}
+	list, err := c.ListJobs(context.Background())
+	if err != nil || len(list) != 2 || !list[0].ArtifactAvailable || list[1].ArtifactAvailable || !list[1].EventsTruncated {
+		t.Fatal(list, err)
+	}
+	job, err := c.GetJob(context.Background(), strings.Repeat("a", 32))
+	if err != nil || job.ArtifactAvailable {
+		t.Fatal(job, err)
+	}
+}
+
+func TestOlderServerAvailabilityAcrossJobResponses(t *testing.T) {
+	c := clientFor(t, func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.Path, "/submissions/") {
+			return response(200, `{"job":{"id":"legacy"}}`), nil
+		}
+		return response(200, `{"id":"legacy"}`), nil
+	})
+	ctx := context.Background()
+	id := strings.Repeat("a", 32)
+	submitted, err := c.Submit(ctx, jobs.Request{RequestID: id})
+	if err != nil || !submitted.ArtifactAvailable {
+		t.Fatal(submitted, err)
+	}
+	submission, err := c.Submission(ctx, id)
+	if err != nil || !submission.Job.ArtifactAvailable {
+		t.Fatal(submission, err)
+	}
+	canceled, err := c.Cancel(ctx, id)
+	if err != nil || !canceled.ArtifactAvailable {
+		t.Fatal(canceled, err)
+	}
+	loaded, err := c.GetJob(ctx, id)
+	if err != nil || !loaded.ArtifactAvailable {
+		t.Fatal(loaded, err)
+	}
+}
