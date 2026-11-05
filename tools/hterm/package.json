@@ -1,0 +1,21 @@
+{
+  "name": "station-terminal-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs --check",
+    "test": "node browser-test.mjs"
+  },
+  "devDependencies": {
+    "@bkuri/rollup-plugin-string": "1.0.0",
+    "@rollup/plugin-image": "3.0.3",
+    "@rollup/plugin-json": "6.1.0",
+    "@rollup/plugin-node-resolve": "15.3.1",
+    "@rollup/plugin-terser": "0.4.4",
+    "@rollup/plugin-url": "8.0.2",
+    "playwright": "1.64.1",
+    "punycode": "2.3.1",
+    "rollup": "2.80.0"
+  }
+}

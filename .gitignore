@@ -5,3 +5,6 @@
 *.log
 .DS_Store
 build/
+
+# Optional browser asset maintenance tools
+/tools/hterm/node_modules/

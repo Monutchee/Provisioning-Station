@@ -1,0 +1,7 @@
+{
+  "upstream": "https://chromium.googlesource.com/apps/libapps",
+  "revision": "55c860e79cb4a2fb160f7dfd63c00d8120fab24d",
+  "hterm": "1.92.1",
+  "libdot": "9.0.0",
+  "sha256": "28272f4302291e7b8750b88379cf09e3696695dd07591a2538cf60c88585ce91"
+}
