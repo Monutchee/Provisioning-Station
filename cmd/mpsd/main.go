@@ -18,15 +18,10 @@ import (
 	"time"
 
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
+	"github.com/Monutchee/Provisioning-Station/internal/buildinfo"
 	"github.com/Monutchee/Provisioning-Station/internal/daemon"
 	"github.com/Monutchee/Provisioning-Station/internal/serialconsole"
 	"github.com/Monutchee/Provisioning-Station/internal/xsdb"
-)
-
-var (
-	version   = "dev"
-	commit    = "unknown"
-	buildDate = "unknown"
 )
 
 const usage = `Monutchee Provisioning Station
@@ -65,7 +60,7 @@ func run(arguments []string) error {
 	case "token":
 		return runToken(arguments[1:])
 	case "version", "--version", "-version":
-		fmt.Printf("mpsd %s (commit %s, built %s)\n", version, commit, buildDate)
+		fmt.Println(buildinfo.String("mpsd"))
 		return nil
 	case "help", "--help", "-h":
 		fmt.Print(usage)
@@ -164,7 +159,7 @@ func defaultServeConfig() (serveConfig, error) {
 		return serveConfig{}, err
 	}
 	return serveConfig{
-		Version:              version,
+		Version:              buildinfo.Version,
 		HTTPListen:           environmentOr("MPS_HTTP_LISTEN", "0.0.0.0:8042"),
 		TFTPListen:           environmentOr("MPS_TFTP_LISTEN", ":69"),
 		DataDir:              environmentOr("MPS_DATA_DIR", configDirectory),

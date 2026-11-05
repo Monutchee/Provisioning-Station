@@ -127,6 +127,7 @@ func Run(shutdownContext context.Context, config Config, ready func()) error {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
+	defer httpServer.Close()
 	url := listenerURL(listener.Addr())
 	fmt.Printf("Monutchee Provisioning Station %s\n", config.Version)
 	fmt.Printf("Dashboard: %s\n", url)

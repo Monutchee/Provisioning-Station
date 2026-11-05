@@ -125,7 +125,12 @@ func (c *Client) redact(s string) string {
 	if c.token != "" {
 		s = strings.ReplaceAll(s, c.token, "[redacted]")
 	}
-	return s
+	return strings.Map(func(r rune) rune {
+		if r >= 32 && (r < 127 || r > 159) {
+			return r
+		}
+		return -1
+	}, s)
 }
 func (c *Client) request(ctx context.Context, method, path string, q url.Values, body io.Reader, contentType string) (*http.Response, error) {
 	u := *c.base
