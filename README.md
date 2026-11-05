@@ -148,7 +148,7 @@ daemon owns hardware and persistent state.
 
 ## Artifact workflow
 
-demo board Yocto builds publish `demo-board-jtag-image.tar.gz` in
+A demo Yocto build can publish `demo-board-jtag-image.tar.gz` in
 `build/export/provision-image/`. Import that file in the dashboard or use the
 workspace integration:
 
@@ -259,7 +259,7 @@ make test-race   # race detector on supported host platforms
 make cross       # Linux and Windows release-shaped binaries
 ```
 
-Hardware tests are deliberately separate from unit tests. A successful demo board
+Hardware tests are deliberately separate from unit tests. A successful board
 smoke test requires XSDB to finish, every file declared below the artifact's
 `tftpRoot` to be requested successfully, and Linux to boot on the board.
 

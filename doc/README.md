@@ -1,7 +1,7 @@
 # Provisioning Station user guide
 
 This guide explains how to run the Monutchee Provisioning Station, import a
-Station artifact, and boot an demo board board through Xilinx JTAG. For compiler and
+Station artifact, and boot a board through Xilinx JTAG. For compiler and
 packaging instructions, see [BUILDING.md](BUILDING.md).
 
 The first supported operation is a RAM boot using Xilinx XSDB. The Station does
@@ -41,8 +41,8 @@ Before starting a real JTAG boot, make sure that:
 - The target board can reach the Station computer over the provisioning
   network.
 - UDP port 69 is available for the Station's TFTP listener.
-- An `mnc-station-artifact` v2 `.tar.gz` file is available. For demo board this is
-  normally `demo-board-jtag-image.tar.gz` from the Yocto
+- An `mnc-station-artifact` v2 `.tar.gz` file is available, such as
+  `demo-board-jtag-image.tar.gz` from the Yocto
   `build/export/provision-image/` directory.
 
 Only one provisioning job runs at a time. Selecting multiple JTAG devices
@@ -278,8 +278,9 @@ before touching hardware.
 
 ## Boot with `mnc deploy`
 
-The demo board workspace command uses the same HTTP API as the browser. Start the
-Station first, then configure `MncBuildPreset.yaml` in the product workspace:
+A product workspace command can use the same HTTP API as the browser. Start the
+Station first, then configure `MncBuildPreset.yaml` in the product workspace.
+Replace the documentation addresses below with addresses reachable by your board:
 
 ```yaml
 version: 1
@@ -298,7 +299,7 @@ Run:
 ./mnc deploy
 ```
 
-For demo board, `mnc` reads the stable artifact from:
+For this demo product, `mnc` reads the stable artifact from:
 
 ```text
 yocto-build/build/export/provision-image/demo-board-jtag-image.tar.gz
