@@ -1,15 +1,16 @@
 GO ?= go
 GOFMT ?= gofmt
-VERSION ?= dev
-COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || printf unknown)
+VERSION ?= $(shell bash -c 'source packaging/git-version.sh; station_display_version "$$PWD"')
+COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || printf unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)
+BUILDINFO := github.com/Monutchee/Provisioning-Station/internal/buildinfo
+LDFLAGS := -s -w -X $(BUILDINFO).Version=$(VERSION) -X $(BUILDINFO).Commit=$(COMMIT) -X $(BUILDINFO).BuildDate=$(BUILD_DATE)
 
 .PHONY: build test test-race fmt-check vet check cross clean
-
 build:
 	mkdir -p dist
-	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/mnc-station ./cmd/mnc-station
+	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/mps ./cmd/mps
+	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/mpsd ./cmd/mpsd
 
 test:
 	$(GO) test ./...
@@ -27,9 +28,11 @@ check: fmt-check vet test
 
 cross:
 	mkdir -p dist
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/mnc-station-linux-amd64 ./cmd/mnc-station
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/mnc-station-linux-arm64 ./cmd/mnc-station
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/mnc-station-windows-amd64.exe ./cmd/mnc-station
+	@for binary in mps mpsd; do \
+	  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/$$binary-linux-amd64 ./cmd/$$binary || exit; \
+	  CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/$$binary-linux-arm64 ./cmd/$$binary || exit; \
+	  CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/$$binary-windows-amd64.exe ./cmd/$$binary || exit; \
+	done
 
 clean:
 	rm -rf -- dist

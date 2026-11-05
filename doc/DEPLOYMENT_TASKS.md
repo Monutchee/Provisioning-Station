@@ -11,7 +11,7 @@ Station versions.
 The production binary starts with an empty trusted registry. No TPM operation
 is implied: its device-specific implementation and contract must be defined
 separately. Task implementations are compiled Go code registered at Station
-startup in `cmd/mnc-station/main.go`; callers cannot register implementations,
+startup in `internal/daemon/daemon.go`; callers cannot register implementations,
 select executable paths, or provide shell commands. Vendor-neutral task behavior
 belongs in `internal/tasks`; hardware policy belongs in its owning adapter.
 
@@ -91,7 +91,7 @@ outcome tasks, the shared cancellation budget, serialization, restart without
 replay, capability discovery, and API rejection. No physical devices are used.
 
 Validated with `go test ./...`, `go test -race ./...`, and `go vet ./...`,
-plus `go build ./cmd/mnc-station` for Linux amd64 and Windows amd64. All passed.
+plus `go build ./cmd/mpsd` for Linux amd64 and Windows amd64. All passed.
 API and runner tests use synthetic loopback TCP/UDP services; no hardware or
 private product evidence was accessed. The production registry remains empty,
 and trusted task implementations must cooperate with context cancellation.

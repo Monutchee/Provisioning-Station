@@ -5,16 +5,18 @@ set -Eeuo pipefail
 if (($# != 1 && $# != 2)); then
     printf 'Usage: %s [VERSION] OUTPUT_DIR\n' "$0" >&2
     printf 'With OUTPUT_DIR only, derive the version from Git tags and commit distance.\n' >&2
-    printf 'Legacy VERSION accepts MNC_STATION_BUILD_ID for VERSION+<build-id>.\n' >&2
+    printf 'Legacy VERSION accepts MPS_BUILD_ID for VERSION+<build-id>.\n' >&2
     exit 2
 fi
 
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 COMMIT="$(git -C "${PROJECT_ROOT}" rev-parse HEAD)"
+source "${PROJECT_ROOT}/packaging/git-version.sh"
+DISPLAY_VERSION="$(station_display_version "${PROJECT_ROOT}")"
 if (($# == 1)); then
     OUTPUT_REQUEST="$1"
-    if [[ -n "${MNC_STATION_BUILD_ID:-}" ]]; then
-        printf 'MNC_STATION_BUILD_ID requires the legacy VERSION OUTPUT_DIR form.\n' >&2
+    if [[ -n "${MPS_BUILD_ID:-}" ]]; then
+        printf 'MPS_BUILD_ID requires the legacy VERSION OUTPUT_DIR form.\n' >&2
         exit 2
     fi
     source "${PROJECT_ROOT}/packaging/git-version.sh"
@@ -26,7 +28,7 @@ else
         printf 'Release version must use MAJOR.MINOR.PATCH: %s\n' "${VERSION}" >&2
         exit 2
     }
-    BUILD_ID="${MNC_STATION_BUILD_ID:-}"
+    BUILD_ID="${MPS_BUILD_ID:-}"
     VERSION_SUFFIX=""
     if [[ -z "${BUILD_ID}" ]]; then
         BUILD_ID="${COMMIT:0:6}"
@@ -88,7 +90,8 @@ fi
 GO="${GO:-go}"
 BUILD_DATE="${SOURCE_DATE_EPOCH:+$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)}"
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
-LDFLAGS="-s -w -X main.version=${RELEASE_VERSION} -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}"
+BUILDINFO="github.com/Monutchee/Provisioning-Station/internal/buildinfo"
+LDFLAGS="-s -w -X ${BUILDINFO}.Version=${DISPLAY_VERSION} -X ${BUILDINFO}.Commit=${COMMIT} -X ${BUILDINFO}.BuildDate=${BUILD_DATE}"
 STAGING="$(mktemp -d)"
 trap 'rm -rf -- "${STAGING}"' EXIT
 
@@ -98,50 +101,56 @@ rm -rf -- "${OUTPUT_DIR}"
 mkdir -p -- "${OUTPUT_DIR}"
 
 build_binary() {
-    local goos="$1" goarch="$2" output="$3"
+    local goos="$1" goarch="$2" output="$3" command="$4"
     (
         cd -- "${PROJECT_ROOT}"
         CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
             "${GO}" build -trimpath -ldflags "${LDFLAGS}" \
-            -o "${output}" ./cmd/mnc-station
+            -o "${output}" "./cmd/${command}"
     )
 }
 
 for arch in amd64 arm64; do
-    package="mnc-station_${RELEASE_VERSION}_linux_${arch}"
+    package="mps_${RELEASE_VERSION}_linux_${arch}"
     root="${STAGING}/${package}"
     mkdir -p -- "${root}"
-    build_binary linux "${arch}" "${root}/mnc-station"
+    build_binary linux "${arch}" "${root}/mps" mps
+    build_binary linux "${arch}" "${root}/mpsd" mpsd
     install -m 0644 "${PROJECT_ROOT}/LICENSE" "${PROJECT_ROOT}/README.md" \
         "${PROJECT_ROOT}/THIRD_PARTY_NOTICES.md" "${root}/"
     install -d -m 0755 "${root}/doc"
     install -m 0644 "${PROJECT_ROOT}/doc/README.md" \
         "${PROJECT_ROOT}/doc/BUILDING.md" \
         "${PROJECT_ROOT}/doc/DEPLOYMENT_TASKS.md" \
-        "${PROJECT_ROOT}/doc/SERIAL_CONSOLE.md" "${root}/doc/"
+        "${PROJECT_ROOT}/doc/SERIAL_CONSOLE.md" "${PROJECT_ROOT}/doc/MIGRATION.md" "${root}/doc/"
     install -d -m 0755 "${root}/api"
     install -m 0644 "${PROJECT_ROOT}/api/openapi.yaml" "${root}/api/"
     install -d -m 0755 "${root}/completion"
-    install -m 0644 "${PROJECT_ROOT}/packaging/bash-completion/mnc-station" \
-        "${root}/completion/mnc-station.bash"
+    install -m 0644 "${PROJECT_ROOT}/packaging/bash-completion/mps" \
+        "${root}/completion/mps.bash"
+    install -m 0644 "${PROJECT_ROOT}/packaging/bash-completion/mpsd" "${root}/completion/mpsd.bash"
+    install -d -m 0755 "${root}/migration/legacy-units"
+    install -m 0755 "${PROJECT_ROOT}/packaging/migration/migrate.py" "${root}/migration/"
+    install -m 0644 "${PROJECT_ROOT}/packaging/migration/legacy-units/"*.service "${root}/migration/legacy-units/"
     tar -C "${STAGING}" -czf "${OUTPUT_DIR}/${package}.tar.gz" "${package}"
     if command -v dpkg-deb >/dev/null 2>&1; then
         "${PROJECT_ROOT}/packaging/debian/build-deb.sh" \
-            "${RELEASE_VERSION}" "${arch}" "${root}/mnc-station" "${OUTPUT_DIR}"
+            "${RELEASE_VERSION}" "${arch}" "${root}/mps" "${root}/mpsd" "${OUTPUT_DIR}"
     fi
 done
 
-package="mnc-station_${RELEASE_VERSION}_windows_amd64"
+package="mps_${RELEASE_VERSION}_windows_amd64"
 root="${STAGING}/${package}"
 mkdir -p -- "${root}"
-build_binary windows amd64 "${root}/mnc-station.exe"
+build_binary windows amd64 "${root}/mps.exe" mps
+build_binary windows amd64 "${root}/mpsd.exe" mpsd
 install -m 0644 "${PROJECT_ROOT}/LICENSE" "${PROJECT_ROOT}/README.md" \
     "${PROJECT_ROOT}/THIRD_PARTY_NOTICES.md" "${root}/"
 install -d -m 0755 "${root}/doc"
 install -m 0644 "${PROJECT_ROOT}/doc/README.md" \
     "${PROJECT_ROOT}/doc/BUILDING.md" \
     "${PROJECT_ROOT}/doc/DEPLOYMENT_TASKS.md" \
-    "${PROJECT_ROOT}/doc/SERIAL_CONSOLE.md" "${root}/doc/"
+    "${PROJECT_ROOT}/doc/SERIAL_CONSOLE.md" "${PROJECT_ROOT}/doc/MIGRATION.md" "${root}/doc/"
 install -d -m 0755 "${root}/api"
 install -m 0644 "${PROJECT_ROOT}/api/openapi.yaml" "${root}/api/"
 (

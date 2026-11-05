@@ -1,0 +1,25 @@
+[Unit]
+Description=Monutchee Provisioning Station
+After=network-online.target mps-hw-server.service
+Wants=network-online.target mps-hw-server.service
+
+[Service]
+Type=simple
+User=mps
+Group=mps
+EnvironmentFile=-/etc/default/mps
+WorkingDirectory=/var/lib/mps
+ExecStart=/usr/bin/mpsd serve
+Restart=on-failure
+RestartSec=2s
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/mps
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

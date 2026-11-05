@@ -1,0 +1,11 @@
+# Copyright 2026 Monutchee
+# SPDX-License-Identifier: Apache-2.0
+_mps() {
+    local current="${COMP_WORDS[COMP_CWORD]}"
+    if ((COMP_CWORD == 1)); then
+        COMPREPLY=( $(compgen -W 'status target artifact job serial tui service mcp version help' -- "$current") )
+    else
+        COMPREPLY=()
+    fi
+}
+complete -F _mps mps

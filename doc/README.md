@@ -55,13 +55,13 @@ Artifact inspection validates the archive, manifest, paths, file types, sizes,
 modes, and SHA-256 values without saving the artifact:
 
 ```bash
-mnc-station inspect demo-board-jtag-image.tar.gz
+mpsd inspect demo-board-jtag-image.tar.gz
 ```
 
 Use JSON output for scripts:
 
 ```bash
-mnc-station inspect --json demo-board-jtag-image.tar.gz
+mpsd inspect --json demo-board-jtag-image.tar.gz
 ```
 
 A valid artifact is not automatically trusted or authorized for production.
@@ -76,23 +76,23 @@ installations below `/opt/Xilinx`. Set an explicit path only for a nonstandard
 installation or to select a specific XSDB version:
 
 ```bash
-export MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
-mnc-station serve --open-browser
+export MPS_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
+mpsd serve --data-dir="$PWD/.station-dev" --open-browser
 ```
 
 TFTP normally uses UDP port 69. A portable binary needs the narrow low-port
 capability when it is run as a regular user:
 
 ```bash
-sudo setcap cap_net_bind_service=+ep /path/to/mnc-station
-/path/to/mnc-station serve --open-browser
+sudo setcap cap_net_bind_service=+ep /path/to/mpsd
+/path/to/mpsd serve --data-dir="$PWD/.station-dev" --open-browser
 ```
 
 Rebuilding or replacing the binary removes that file capability, so apply it
 again after an upgrade. For UI-only testing, use an unprivileged port:
 
 ```bash
-mnc-station serve --tftp-listen=127.0.0.1:6969 --open-browser
+mpsd serve --tftp-listen=127.0.0.1:6969 --open-browser
 ```
 
 A real board still sends its initial TFTP request to port 69, so port 6969 is
@@ -100,46 +100,46 @@ only useful for development and automated tests.
 
 ### Linux system services
 
-The Debian package installs and enables `mnc-station.service`. It pulls in the
-companion `mnc-station-hw-server.service`, which starts a local Xilinx
+The Debian package installs and enables `mps.service`. It pulls in the
+companion `mps-hw-server.service`, which starts a local Xilinx
 `hw_server` automatically when one is available. Both services run as the
-dedicated `mnc-station` account. Its home and writable working directory are
-`/var/lib/mnc-station`, so neither service depends on a developer's user name
+dedicated `mps` account. Its home and writable working directory are
+`/var/lib/mps`, so neither service depends on a developer's user name
 or home directory.
 
 The services have a smaller `PATH` than an interactive shell, but they
 automatically search versioned Vivado, Vitis, and standalone Hardware Server
 (`HWSRVR`) installations below `/opt/Xilinx`. Override either detected
-executable in `/etc/default/mnc-station` only when necessary:
+executable in `/etc/default/mps` only when necessary:
 
 ```text
-MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
-MNC_HW_SERVER=/opt/Xilinx/2025.2/HWSRVR/bin/hw_server
+MPS_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb
+MPS_HW_SERVER=/opt/Xilinx/2025.2/HWSRVR/bin/hw_server
 ```
 
 The managed hardware server listens on `tcp:127.0.0.1:3121` by default. This
 keeps the unauthenticated JTAG control port off the LAN while allowing the
-local Station to use it. Set `MNC_HW_SERVER_LISTEN` only when another trusted
+local Station to use it. Set `MPS_HW_SERVER_LISTEN` only when another trusted
 computer must connect directly:
 
 ```text
-MNC_HW_SERVER_LISTEN=tcp:192.0.2.40:3121
+MPS_HW_SERVER_LISTEN=tcp:192.0.2.40:3121
 ```
 
 Then restart and inspect the service:
 
 ```bash
-sudo systemctl restart mnc-station
-systemctl status mnc-station
-systemctl status mnc-station-hw-server
-journalctl -u mnc-station -u mnc-station-hw-server -f
+sudo systemctl restart mps
+systemctl status mps
+systemctl status mps-hw-server
+journalctl -u mps -u mps-hw-server -f
 ```
 
 Do not run a second local `hw_server` on port 3121. Disable any hand-written
 unit before starting the packaged companion service. XSDB is not a daemon;
 the Station starts it on demand for target discovery and provisioning jobs.
 
-The package adds the `mnc-station` service account to `dialout` and `plugdev`
+The package adds the `mps` service account to `dialout` and `plugdev`
 when those groups exist, allowing it to open serial tty and group-accessible
 JTAG devices after installation. Xilinx's cable-driver udev rules must still
 be installed. For a portable launch, add your own user to the distribution's
@@ -159,72 +159,74 @@ LAN connections ask for the automatically generated API token. Any `172.x`,
 it belongs to the Station computer. Read the token with:
 
 ```bash
-sudo mnc-station token --service
+sudo mpsd token --service
 ```
 
 The command prints only the token, making it convenient to paste into the
 dashboard or capture in a script. Treat its output as a password. The backing
-file remains `/var/lib/mnc-station/api-token`. If the service uses a custom
+file remains `/var/lib/mps/api-token`. If the service uses a custom
 token file, pass its path with `--api-token-file`.
 
 If a managed service token is exposed, rotate it and restart the service:
 
 ```bash
-sudo mnc-station token --rotate --service
-sudo systemctl restart mnc-station
+sudo mpsd token --rotate --service
+sudo systemctl restart mps
 ```
 
 The rotation command prints the replacement token. Update the dashboard,
 `MncBuildPreset.yaml`, and other clients before restarting. The running agent
 continues using the previous in-memory token until it is restarted. For a
-portable Linux or Windows installation, use `mnc-station token --rotate` (or
-`mnc-station.exe token --rotate`) and restart the foreground agent.
+portable Linux or Windows installation, use `mpsd token --rotate` (or
+`mpsd.exe token --rotate`) and restart the foreground agent.
 
 Persistent artifacts, jobs, and the managed token are stored under
-`/var/lib/mnc-station`. If the page is still unreachable, allow TCP port 8042
+`/var/lib/mps`. If the page is still unreachable, allow TCP port 8042
 through the Station firewall for the trusted provisioning network.
 
 The Debian package installs Bash completion for commands and options. Start a
 new Bash shell after installation, or load it immediately with:
 
 ```bash
-source /usr/share/bash-completion/completions/mnc-station
+source /usr/share/bash-completion/completions/mps
+source /usr/share/bash-completion/completions/mpsd
 ```
 
-You can then use completion after `mnc-station`, `mnc-station serve`,
-`mnc-station inspect`, and `mnc-station token`. Linux portable archives
-provide the same script at `completion/mnc-station.bash` inside the extracted
+You can then use completion after `mps` and the daemon administration commands `mpsd serve`,
+`mpsd inspect`, and `mpsd token`. Linux portable archives
+provide the same script at `completion/mps.bash` inside the extracted
 directory.
 
 ## Start the Station on Windows
 
-Open PowerShell or a Xilinx command prompt. The Station searches `PATH`, Xilinx
-environment variables, and versioned Vivado, Vitis, and standalone Hardware
-Server (`HWSRVR`) installations below `C:\Xilinx`. Provide the path to
-`xsdb.bat` only when automatic discovery does not select the desired
-installation:
+The MSI installs `mps.exe` and `mpsd.exe` and starts the native SCM service
+`mps` as LocalService. State and its token live under
+`%ProgramData%\Monutchee\MPS`, protected for LocalService, SYSTEM, and
+Administrators. The Start menu launches `mps`, the terminal UI. An ordinary
+client can query service status; startup requires the Windows account's
+existing SCM authorization. If denied, use an administrator terminal:
 
 ```powershell
-$env:MNC_XSDB = "C:\Xilinx\Vitis\2025.2\bin\xsdb.bat"
-.\mnc-station.exe serve --open-browser
+sc.exe start mps
+mps
 ```
 
-The browser opens `http://127.0.0.1:8042/` without requiring a token, while
-remote clients can use the Windows computer's hostname or IP address with port
-8042 and must authenticate. Show the generated token with
-`mnc-station.exe token`; its backing file is
-`%AppData%\Monutchee\Provisioning-Station\api-token`. Allow the Station
-executable to receive TCP port 8042 and TFTP traffic through Windows Defender
-Firewall on the trusted provisioning network. If the MSI Start menu shortcut
-is used, configure `MNC_XSDB` as a persistent user or system environment
-variable, or make XSDB available on `PATH`.
+The daemon searches `PATH`, Xilinx environment variables, and `C:\Xilinx` for
+vendor tools. Set `MPS_XSDB`/`MPS_HW_SERVER` as machine environment settings
+for nonstandard installs, then restart the service. The service owns an
+optional hw_server child in a kill-on-close Job Object; absent vendor tools
+leave the dashboard/API available. Allow TCP 8042 and the required TFTP traffic
+on the trusted provisioning network.
 
-For UART capture, install the appropriate virtual COM port driver and close
-other terminal programs that own the port. Station lists the current COM
-numbers and uses a unique FTDI EEPROM serial for automatic pairing when that
-identity is available.
+For foreground debugging, use an explicit writable directory:
 
-Stop a foreground Station with `Ctrl+C` on either platform.
+```powershell
+.\mpsd.exe serve --data-dir="$env:TEMP\mps-dev" --open-browser
+```
+
+Stop foreground mode with Ctrl+C. Install a suitable FTDI virtual COM driver
+and close other applications owning a console port. Migrate previous per-user
+state explicitly; see [migration](MIGRATION.md).
 
 ## Boot from the browser dashboard
 
@@ -313,7 +315,7 @@ prints job events until completion. Command-line settings override the preset:
   --board-ip 192.0.2.10
 ```
 
-Set `MNC_STATION_TOKEN` before running `mnc deploy` when the Station API uses
+For the external `mnc` client, set its own `MNC_STATION_TOKEN` before running `mnc deploy` when the Station API uses
 bearer authentication.
 
 ## Runtime configuration
@@ -322,32 +324,30 @@ The commonly used settings are:
 
 | Command option | Environment variable | Default |
 | --- | --- | --- |
-| `--http-listen` | `MNC_STATION_HTTP_LISTEN` | `0.0.0.0:8042` |
-| `--tftp-listen` | `MNC_STATION_TFTP_LISTEN` | `:69` |
-| `--data-dir` | `MNC_STATION_DATA_DIR` | Platform user configuration directory |
-| `--xsdb-path` | `MNC_XSDB` | Search `PATH`, Xilinx environment, then default install root |
-| `--api-token-file` | `MNC_STATION_TOKEN_FILE` | Not set |
-| — | `MNC_STATION_TOKEN` | Not set |
+| `--http-listen` | `MPS_HTTP_LISTEN` | `0.0.0.0:8042` |
+| `--tftp-listen` | `MPS_TFTP_LISTEN` | `:69` |
+| `--data-dir` | `MPS_DATA_DIR` | Machine-wide state directory |
+| `--xsdb-path` | `MPS_XSDB` | Search `PATH`, Xilinx environment, then default install root |
+| `--api-token-file` | `MPS_TOKEN_FILE` | Not set |
+| — | `MPS_TOKEN` | Not set |
 | `--job-timeout` | — | `10m` |
 | `--max-artifact-bytes` | — | 2 GiB |
 | `--max-unpacked-bytes` | — | 8 GiB |
-| `--serial-baud` | `MNC_STATION_SERIAL_BAUD` | `115200` |
-| `--max-console-log-bytes` | `MNC_STATION_MAX_CONSOLE_LOG_BYTES` | 16 MiB |
+| `--serial-baud` | `MPS_SERIAL_BAUD` | `115200` |
+| `--max-console-log-bytes` | `MPS_MAX_CONSOLE_LOG_BYTES` | 16 MiB |
 
-Run `mnc-station serve -help` for the complete option list.
+Run `mpsd serve -help` for the complete option list.
 
-The Linux companion service runs `mnc-station hw-server`. That command accepts
-`--hw-server-path` (`MNC_HW_SERVER`) and `--listen`
-(`MNC_HW_SERVER_LISTEN`). The defaults are automatic discovery and
+The Linux companion service runs `mpsd hw-server`. That command accepts
+`--hw-server-path` (`MPS_HW_SERVER`) and `--listen`
+(`MPS_HW_SERVER_LISTEN`). The defaults are automatic discovery and
 `tcp:127.0.0.1:3121`; `--check` reports whether an executable can be resolved
 without starting it.
 
-On a normal user launch, data is stored below the operating system's user
-configuration directory. Typical locations are:
-
-- Linux: `${XDG_CONFIG_HOME:-$HOME/.config}/Monutchee/Provisioning-Station`
-- Windows: `%AppData%\Monutchee\Provisioning-Station`
-- Debian service: `/var/lib/mnc-station`
+The machine-wide state defaults are `/var/lib/mps` on Linux and
+`%ProgramData%\Monutchee\MPS` on Windows. Foreground development can select
+an explicit writable `--data-dir`. A process-wide OS lock prevents two daemons
+from recovering or modifying the same state concurrently.
 
 The data directory contains retained artifacts and persistent job/event
 records. Do not edit it while the Station is running.
@@ -360,20 +360,20 @@ control authenticated, the Station creates a random 48-character token at
 listener can run without authentication:
 
 ```bash
-mnc-station serve --http-listen=127.0.0.1:8042
+mpsd serve --http-listen=127.0.0.1:8042
 ```
 
 To provide your own token on Linux, create a file readable only by the service
-account and set `MNC_STATION_TOKEN_FILE` in `/etc/default/mnc-station`. For a
+account and set `MPS_TOKEN_FILE` in `/etc/default/mps`. For a
 foreground development session, an environment variable can be used:
 
 ```bash
-export MNC_STATION_TOKEN='replace-with-a-long-random-token'
-mnc-station serve --http-listen=192.0.2.30:8042
+export MPS_TOKEN='replace-with-a-long-random-token'
+mpsd serve --http-listen=192.0.2.30:8042
 ```
 
 The browser asks for the token, and command-line clients read
-`MNC_STATION_TOKEN`. A bearer token authenticates requests but does not encrypt
+`MPS_TOKEN`. A bearer token authenticates requests but does not encrypt
 HTTP traffic. Put a trusted TLS or mutually authenticated reverse proxy in
 front of the Station before allowing control from outside a trusted station
 network. The health endpoint remains public.
@@ -391,11 +391,11 @@ leases, and capture behavior are explained in
   does not provide HTTPS directly.
 - Run `sudo ss -ltnp | grep ':8042'` and confirm the listener is
   `0.0.0.0:8042`.
-- Check `systemctl status mnc-station` and
-  `journalctl -u mnc-station --no-pager -n 100`.
+- Check `systemctl status mps` and
+  `journalctl -u mps --no-pager -n 100`.
 - Allow TCP port 8042 through the firewall only on the trusted provisioning
   network.
-- Do not launch a second `mnc-station` process while the packaged systemd
+- Do not launch a second `mps` process while the packaged systemd
   service owns the port.
 
 ### XSDB is unavailable
@@ -406,21 +406,21 @@ leases, and capture behavior are explained in
   that the systemd service does not inherit your interactive shell's `PATH`.
 - The automatic search checks `PATH`, `XILINX_VITIS`, `XILINX_VIVADO`, and
   `/opt/Xilinx` on Linux or `C:\Xilinx` on Windows.
-- Set `MNC_XSDB` or pass `--xsdb-path` with the full `xsdb`/`xsdb.bat` path to
+- Set `MPS_XSDB` or pass `--xsdb-path` with the full `xsdb`/`xsdb.bat` path to
   override automatic discovery.
-- When using the Linux service, update `/etc/default/mnc-station` and restart
+- When using the Linux service, update `/etc/default/mps` and restart
   the service.
 - XSDB must be installed on the Station computer even when `hw_server` is
   remote.
 
 ### The managed hardware server is unavailable
 
-- Run `sudo -u mnc-station mnc-station hw-server --check` to verify discovery
+- Run `sudo -u mps mpsd hw-server --check` to verify discovery
   using the service identity.
-- Inspect `systemctl status mnc-station-hw-server` and
-  `journalctl -u mnc-station-hw-server --no-pager -n 100`.
-- Set `MNC_HW_SERVER` in `/etc/default/mnc-station` when the executable uses a
-  nonstandard path, then restart `mnc-station`.
+- Inspect `systemctl status mps-hw-server` and
+  `journalctl -u mps-hw-server --no-pager -n 100`.
+- Set `MPS_HW_SERVER` in `/etc/default/mps` when the executable uses a
+  nonstandard path, then restart `mps`.
 - Install the Xilinx cable-driver udev rules so the unprivileged service
   account can access the JTAG adapter. Do not run `hw_server` as root to work
   around missing device rules.

@@ -79,13 +79,16 @@ jobs:
           $commit = (git rev-parse HEAD).Trim()
           $date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
           New-Item -ItemType Directory -Force release\input | Out-Null
-          go build -trimpath -ldflags "-s -w -X main.version=$env:RELEASE_VERSION -X main.commit=$commit -X main.buildDate=$date" -o release\input\mnc-station.exe .\cmd\mnc-station
+          $info = "github.com/Monutchee/Provisioning-Station/internal/buildinfo"
+          $ldflags = "-s -w -X $info.Version=v$env:RELEASE_VERSION -X $info.Commit=$commit -X $info.BuildDate=$date"
+          go build -trimpath -ldflags $ldflags -o release\input\mps.exe .\cmd\mps
+          go build -trimpath -ldflags $ldflags -o release\input\mpsd.exe .\cmd\mpsd
           Copy-Item -Path LICENSE, THIRD_PARTY_NOTICES.md -Destination release\input\
       - name: Build MSI with WiX
         shell: pwsh
         run: |
           dotnet tool install --global wix --version 6.0.0
-          wix build -arch x64 -d Version=$env:BASE_VERSION -d SourceDir="$pwd\release\input" -o "release\mnc-station_$($env:RELEASE_VERSION)_windows_amd64.msi" packaging\windows\Product.wxs
+          wix build -arch x64 -d Version=$env:BASE_VERSION -d SourceDir="$pwd\release\input" -o "release\mps_$($env:RELEASE_VERSION)_windows_amd64.msi" packaging\windows\Product.wxs
       - uses: actions/upload-artifact@v7
         with:
           name: release-msi

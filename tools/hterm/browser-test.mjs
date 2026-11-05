@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { chromium } from 'playwright';
 
 const directory = await mkdtemp(join(tmpdir(), 'station-terminal-test-'));
-const server = spawn(process.env.STATION_BINARY || '/tmp/mnc-station-browser', ['serve', '--http-listen=127.0.0.1:0', '--tftp-listen=127.0.0.1:0', `--data-dir=${directory}`], { env: { ...process.env, MNC_STATION_API_TOKEN: '' } });
+const server = spawn(process.env.STATION_BINARY || '/tmp/mpsd-browser', ['serve', '--http-listen=127.0.0.1:0', '--tftp-listen=127.0.0.1:0', `--data-dir=${directory}`], { env: { ...process.env, MPS_TOKEN: '', MPS_TOKEN_FILE: '' } });
 let browser;
 try {
   const url = await new Promise((resolve, reject) => {

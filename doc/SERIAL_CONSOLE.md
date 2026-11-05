@@ -138,7 +138,7 @@ Only received bytes are recorded; operator input is not added to the job
 transcript. The default per-job limit is 16 MiB. On reaching it, capture is
 marked `truncated`, retention stops, and live streaming continues. Change the
 limit with `--max-console-log-bytes` or
-`MNC_STATION_MAX_CONSOLE_LOG_BYTES`.
+`MPS_MAX_CONSOLE_LOG_BYTES`.
 
 ## Host access
 

@@ -1,7 +1,7 @@
 # Copyright 2026 Monutchee
 # SPDX-License-Identifier: Apache-2.0
 
-_mnc_station_complete_files()
+_mps_daemon_complete_files()
 {
     local prefix="$1"
     local value="$2"
@@ -14,7 +14,7 @@ _mnc_station_complete_files()
     compopt -o filenames 2>/dev/null || true
 }
 
-_mnc_station()
+_mps_daemon()
 {
     local cur="${COMP_WORDS[COMP_CWORD]}"
     local prev=""
@@ -38,13 +38,13 @@ _mnc_station()
                 --data-dir=*|-data-dir=*|--xsdb-path=*|-xsdb-path=*|--api-token-file=*|-api-token-file=*)
                     prefix="${cur%%=*}="
                     value="${cur#*=}"
-                    _mnc_station_complete_files "${prefix}" "${value}"
+                    _mps_daemon_complete_files "${prefix}" "${value}"
                     return
                     ;;
             esac
             case "${prev}" in
                 --data-dir|-data-dir|--xsdb-path|-xsdb-path|--api-token-file|-api-token-file)
-                    _mnc_station_complete_files "" "${cur}"
+                    _mps_daemon_complete_files "" "${cur}"
                     return
                     ;;
                 --http-listen|-http-listen|--tftp-listen|-tftp-listen|--max-artifact-bytes|-max-artifact-bytes|--max-unpacked-bytes|-max-unpacked-bytes|--serial-baud|-serial-baud|--max-console-log-bytes|-max-console-log-bytes)
@@ -63,13 +63,13 @@ _mnc_station()
                 --hw-server-path=*|-hw-server-path=*)
                     prefix="${cur%%=*}="
                     value="${cur#*=}"
-                    _mnc_station_complete_files "${prefix}" "${value}"
+                    _mps_daemon_complete_files "${prefix}" "${value}"
                     return
                     ;;
             esac
             case "${prev}" in
                 --hw-server-path|-hw-server-path)
-                    _mnc_station_complete_files "" "${cur}"
+                    _mps_daemon_complete_files "" "${cur}"
                     return
                     ;;
                 --listen|-listen)
@@ -83,7 +83,7 @@ _mnc_station()
             if [[ "${cur}" == -* ]]; then
                 mapfile -t COMPREPLY < <(compgen -W '--json --help -h' -- "${cur}")
             else
-                _mnc_station_complete_files "" "${cur}"
+                _mps_daemon_complete_files "" "${cur}"
             fi
             ;;
         token)
@@ -91,13 +91,13 @@ _mnc_station()
                 --data-dir=*|-data-dir=*|--api-token-file=*|-api-token-file=*)
                     prefix="${cur%%=*}="
                     value="${cur#*=}"
-                    _mnc_station_complete_files "${prefix}" "${value}"
+                    _mps_daemon_complete_files "${prefix}" "${value}"
                     return
                     ;;
             esac
             case "${prev}" in
                 --data-dir|-data-dir|--api-token-file|-api-token-file)
-                    _mnc_station_complete_files "" "${cur}"
+                    _mps_daemon_complete_files "" "${cur}"
                     return
                     ;;
             esac
@@ -109,4 +109,4 @@ _mnc_station()
     esac
 }
 
-complete -F _mnc_station mnc-station
+complete -F _mps_daemon mpsd

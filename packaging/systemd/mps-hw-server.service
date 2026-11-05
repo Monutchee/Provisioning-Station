@@ -1,0 +1,37 @@
+[Unit]
+Description=Xilinx Hardware Server for Monutchee Provisioning Station
+After=network-online.target
+Wants=network-online.target
+Before=mps.service
+PartOf=mps.service
+
+[Service]
+Type=exec
+User=mps
+Group=mps
+Environment=HOME=/var/lib/mps
+EnvironmentFile=-/etc/default/mps
+WorkingDirectory=/var/lib/mps
+ExecCondition=/usr/bin/mpsd hw-server --check
+ExecStart=/usr/bin/mpsd hw-server
+Restart=on-failure
+RestartSec=2s
+CapabilityBoundingSet=
+LockPersonality=true
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ReadWritePaths=/var/lib/mps
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

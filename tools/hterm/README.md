@@ -25,9 +25,9 @@ For browser regression tests, build the real server and install Playwright's
 Chromium (build/test tools only):
 
 ```sh
-go build -o /tmp/mnc-station-browser ../../cmd/mnc-station
+go build -o /tmp/mpsd-browser ../../cmd/mpsd
 npx playwright install chromium
-STATION_BINARY=/tmp/mnc-station-browser npm test
+STATION_BINARY=/tmp/mpsd-browser npm test
 ```
 
 `CHROMIUM_EXECUTABLE` can select an already installed Chromium. Tests launch the

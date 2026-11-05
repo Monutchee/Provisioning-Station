@@ -11,7 +11,7 @@ Hardware Server installation and can connect to either a local or remote
 `hw_server`.
 
 ```text
-Browser / mnc / future cloud controller
+Browser / mps CLI, TUI, MCP / future cloud controller
                   │ HTTP API v1
                   ▼
         ┌────────────────────────────┐
@@ -41,7 +41,7 @@ agent exposes the stable boundary they can call later.
 
 ## What is implemented
 
-- One Go binary for Linux and Windows, with no runtime package dependencies.
+- Separate `mpsd` daemon and `mps` CLI/TUI/MCP client for Linux and Windows.
 - Embedded local browser UI and a versioned JSON/streaming HTTP API.
 - Strict import of `mnc-station-artifact` format v2 archives.
 - Content-addressed artifact storage with checksum, size, mode, ordering, and
@@ -68,9 +68,9 @@ Go 1.27 or newer is required to build the agent.
 
 ```bash
 go test ./...
-go build -trimpath -o mnc-station ./cmd/mnc-station
-MNC_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb \
-  ./mnc-station serve --open-browser
+make build
+MPS_XSDB=/opt/Xilinx/Vitis/2025.2/bin/xsdb \
+  ./dist/mpsd serve --data-dir="$PWD/.station-dev" --open-browser
 ```
 
 The agent listens on `0.0.0.0:8042` by default. Open the dashboard locally at
@@ -84,7 +84,7 @@ on Linux or `C:\Xilinx` on Windows. This includes paths such as
 `/opt/Xilinx/2025.2/HWSRVR/bin/xsdb`.
 
 The Debian service also starts a companion local Xilinx `hw_server` when one
-is discoverable. It runs as the dedicated `mnc-station` account rather than a
+is discoverable. It runs as the dedicated `mps` account rather than a
 login user and listens only on `127.0.0.1:3121` by default. XSDB itself remains
 an on-demand process started for target discovery and provisioning jobs.
 
@@ -93,12 +93,43 @@ has only the narrow low-port capability) or grant that capability to a local
 development binary:
 
 ```bash
-sudo setcap cap_net_bind_service=+ep ./mnc-station
+sudo setcap cap_net_bind_service=+ep ./dist/mpsd
 ```
 
 For UI/API development without a board, use an unprivileged port such as
 `--tftp-listen=127.0.0.1:6969`. This does not change the board's standard TFTP
 port, so it is not suitable for the real boot flow.
+
+## Terminal and automation clients
+
+Run `mps` without arguments for the terminal UI. It connects to the local HTTP
+API and uses OS-authorized service startup without password prompts. If service
+startup is denied, use an administrator terminal; the client never elevates
+itself. A standalone daemon can be started with `mpsd serve --data-dir=...`.
+Use `mps help` for the CLI surface, including status, target discovery, artifacts,
+jobs, serial discovery/recorded output, and service control. A live terminal
+console is deferred.
+
+For scripts, pass global connection flags before the command:
+
+```bash
+mps --url http://127.0.0.1:8042 status
+mps artifact import /path/to/artifact.tar.gz
+mps target list
+mps job submit --request /path/to/job.json --acknowledge-reset --request-id 0123456789abcdef0123456789abcdef
+mps job reconcile 0123456789abcdef0123456789abcdef
+mps job logs --follow JOB_ID
+```
+
+A submission must name an explicit target. Hardware reset acknowledgement is
+required. Request IDs are 32 lowercase hexadecimal characters; the client
+generates and prints one before submitting when omitted. Reconcile uncertain
+submissions with that same request ID.
+
+`mps mcp` serves MCP over stdio with the same explicit workflow. It never
+starts a service automatically. Client disconnects do not cancel jobs; cancel
+explicitly. The browser, terminal, CLI, and MCP all use `/api/v1`, and only the
+daemon owns hardware and persistent state.
 
 ## Artifact workflow
 
@@ -118,7 +149,7 @@ loader receives:
 <hw-server-url> <tftp-server-ipv4> [board-ipv4] [xsdb-target-id]
 ```
 
-Use `mnc-station inspect <artifact.tar.gz>` to validate and summarize an
+Use `mpsd inspect <artifact.tar.gz>` to validate and summarize an
 artifact without retaining it.
 
 ## Configuration
@@ -127,32 +158,32 @@ The most useful service flags and environment variables are:
 
 | Flag | Environment | Default |
 | --- | --- | --- |
-| `--http-listen` | `MNC_STATION_HTTP_LISTEN` | `0.0.0.0:8042` |
-| `--tftp-listen` | `MNC_STATION_TFTP_LISTEN` | `:69` |
-| `--data-dir` | `MNC_STATION_DATA_DIR` | platform user config directory |
-| `--xsdb-path` | `MNC_XSDB` | auto-detect |
-| `--api-token-file` | `MNC_STATION_TOKEN_FILE` | none |
-| `--serial-baud` | `MNC_STATION_SERIAL_BAUD` | `115200` |
-| `--max-console-log-bytes` | `MNC_STATION_MAX_CONSOLE_LOG_BYTES` | `16777216` |
+| `--http-listen` | `MPS_HTTP_LISTEN` | `0.0.0.0:8042` |
+| `--tftp-listen` | `MPS_TFTP_LISTEN` | `:69` |
+| `--data-dir` | `MPS_DATA_DIR` | `/var/lib/mps` on Linux; ProgramData on Windows |
+| `--xsdb-path` | `MPS_XSDB` | auto-detect |
+| `--api-token-file` | `MPS_TOKEN_FILE` | none |
+| `--serial-baud` | `MPS_SERIAL_BAUD` | `115200` |
+| `--max-console-log-bytes` | `MPS_MAX_CONSOLE_LOG_BYTES` | `16777216` |
 
-The companion `mnc-station hw-server` command accepts `--hw-server-path` and
-`--listen`. Their service environment equivalents are `MNC_HW_SERVER` and
-`MNC_HW_SERVER_LISTEN`; the defaults are automatic executable discovery and
+The companion `mpsd hw-server` command accepts `--hw-server-path` and
+`--listen`. Their service environment equivalents are `MPS_HW_SERVER` and
+`MPS_HW_SERVER_LISTEN`; the defaults are automatic executable discovery and
 `tcp:127.0.0.1:3121`.
 
-`MNC_STATION_TOKEN` can supply the token directly. Direct browser/API requests
+`MPS_TOKEN` can supply the token directly. Direct browser/API requests
 to an IP loopback URL such as `http://127.0.0.1:8042` or `http://[::1]:8042`
 do not require the token. A LAN URL—including any `172.x.x.x` address—still
 requires it. When listening on a non-loopback address without an explicitly
 configured token, the agent creates
 a private `api-token` file in its data directory. The Debian service stores it
-at `/var/lib/mnc-station/api-token`; display it with
-`sudo mnc-station token --service` and enter it when the dashboard asks.
+at `/var/lib/mps/api-token`; display it with
+`sudo mpsd token --service` and enter it when the dashboard asks.
 Rotate a managed Debian service token after accidental disclosure with:
 
 ```bash
-sudo mnc-station token --rotate --service
-sudo systemctl restart mnc-station
+sudo mpsd token --rotate --service
+sudo systemctl restart mps
 ```
 
 The first command prints the new token. Update every client and preset before
@@ -199,9 +230,11 @@ and a Windows MSI. Pushing an annotated `vMAJOR.MINOR.PATCH` tag creates a
 GitHub release and attaches every installer plus `SHA256SUMS`; see the
 [building guide](doc/BUILDING.md#continuous-integration-and-tagged-releases).
 
-The Windows installer places `mnc-station.exe` in Program Files. Run
-`mnc-station.exe serve --open-browser` from a Xilinx-enabled terminal, or set
-`MNC_XSDB` to the installed `xsdb.bat` path.
+The Windows MSI installs both programs and the native `mps` service under
+LocalService, with private state in `%ProgramData%\Monutchee\MPS`. The Start
+menu opens `mps`; `mpsd.exe serve` remains available for foreground debugging.
+Linux packages install `mps.service` and optional `mps-hw-server.service` under
+the `mps` account. See [migration](doc/MIGRATION.md) for legacy installations.
 
 ## Development
 

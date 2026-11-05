@@ -1,28 +1,26 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package
-      Name="Monutchee Provisioning Station"
-      Manufacturer="Monutchee"
-      Version="$(var.Version)"
-      UpgradeCode="A01B14FC-3A83-4C8E-A2E6-C056AB8A2F27"
-      Scope="perMachine"
-      InstallerVersion="500">
+  <Package Name="Monutchee Provisioning Station" Manufacturer="Monutchee"
+      Version="$(var.Version)" UpgradeCode="A01B14FC-3A83-4C8E-A2E6-C056AB8A2F27"
+      Scope="perMachine" InstallerVersion="500">
     <MajorUpgrade DowngradeErrorMessage="A newer Provisioning Station is already installed." />
     <MediaTemplate EmbedCab="yes" />
-
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Monutchee Provisioning Station">
-        <Component Id="StationExecutable" Guid="*" Bitness="always64">
-          <File Id="StationExecutableFile" Source="$(var.SourceDir)\mnc-station.exe" KeyPath="yes">
-            <Shortcut
-                Id="StationStartMenuShortcut"
-                Directory="ProgramMenuFolder"
-                Name="Monutchee Provisioning Station"
-                Description="Open the local provisioning dashboard"
-                Arguments="serve --open-browser"
-                WorkingDirectory="INSTALLFOLDER"
-              Advertise="yes" />
+        <Component Id="StationDaemon" Guid="*" Bitness="always64">
+          <File Id="StationDaemonFile" Source="$(var.SourceDir)\mpsd.exe" KeyPath="yes" />
+          <ServiceInstall Id="StationService" Name="mps" DisplayName="Monutchee Provisioning Station"
+              Description="Local hardware provisioning daemon" Type="ownProcess" Start="auto"
+              ErrorControl="normal" Account="NT AUTHORITY\LocalService" Arguments="service" />
+          <ServiceControl Id="StationServiceControl" Name="mps" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+        </Component>
+        <Component Id="StationClient" Guid="*" Bitness="always64">
+          <File Id="StationClientFile" Source="$(var.SourceDir)\mps.exe" KeyPath="yes">
+            <Shortcut Id="StationStartMenuShortcut" Directory="ProgramMenuFolder"
+                Name="Monutchee Provisioning Station" Description="Open provisioning terminal"
+                WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
           </File>
+          <Environment Id="StationPath" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
         </Component>
         <Component Id="StationLicense" Guid="*" Bitness="always64">
           <File Id="StationLicenseFile" Source="$(var.SourceDir)\LICENSE" KeyPath="yes" />
@@ -32,9 +30,22 @@
         </Component>
       </Directory>
     </StandardDirectory>
-
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="MonutcheeData" Name="Monutchee">
+        <Directory Id="StationData" Name="MPS">
+          <Component Id="StationStateDirectory" Guid="*" Bitness="always64" Permanent="yes">
+            <CreateFolder>
+              <PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;LS)" />
+            </CreateFolder>
+            <RegistryValue Root="HKLM" Key="Software\Monutchee\MPS" Name="StateDirectory" Type="string" Value="[StationData]" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
     <Feature Id="MainFeature" Title="Provisioning Station" Level="1">
-      <ComponentRef Id="StationExecutable" />
+      <ComponentRef Id="StationDaemon" />
+      <ComponentRef Id="StationClient" />
+      <ComponentRef Id="StationStateDirectory" />
       <ComponentRef Id="StationLicense" />
       <ComponentRef Id="StationThirdPartyNotices" />
     </Feature>
