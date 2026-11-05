@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -85,6 +86,7 @@ func New(config Config, artifacts *artifact.Store, jobManager *jobs.Manager) (*S
 	mux.Handle("POST /api/v1/serial/sessions", server.authorize(http.HandlerFunc(server.createSerialSession)))
 	mux.Handle("DELETE /api/v1/serial/sessions/{id}", server.authorize(http.HandlerFunc(server.deleteSerialSession)))
 	mux.HandleFunc("GET /api/v1/serial/sessions/{id}/stream", server.streamSerialSession)
+	mux.Handle("GET /api/v1/submissions/{id}", server.authorize(http.HandlerFunc(server.getSubmission)))
 	mux.Handle("GET /api/v1/jobs", server.authorize(http.HandlerFunc(server.listJobs)))
 	mux.Handle("POST /api/v1/jobs", server.authorize(http.HandlerFunc(server.createJob)))
 	mux.Handle("GET /api/v1/jobs/{id}", server.authorize(http.HandlerFunc(server.getJob)))
@@ -262,13 +264,32 @@ func (server *Server) createJob(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	job, err := server.jobs.CreateContext(request.Context(), jobRequest)
+	job, replay, err := server.jobs.CreateSubmissionContext(request.Context(), jobRequest)
 	if err != nil {
+		var conflict *jobs.RequestConflictError
+		if errors.As(err, &conflict) {
+			writeError(response, http.StatusConflict, "request_conflict", err.Error())
+			return
+		}
 		writeError(response, http.StatusBadRequest, "job_rejected", err.Error())
 		return
 	}
 	response.Header().Set("Location", "/api/v1/jobs/"+job.ID)
-	writeJSON(response, http.StatusCreated, job)
+	status := http.StatusCreated
+	if replay {
+		status = http.StatusOK
+	}
+	writeJSON(response, status, job)
+}
+
+func (server *Server) getSubmission(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	job, err := server.jobs.Submission(id)
+	if err != nil {
+		writeError(response, http.StatusNotFound, "submission_not_found", err.Error())
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"requestId": id, "jobId": job.ID, "job": job})
 }
 
 func (server *Server) getJob(response http.ResponseWriter, request *http.Request) {
@@ -296,7 +317,19 @@ func (server *Server) jobEvents(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	if !strings.Contains(request.Header.Get("Accept"), "text/event-stream") {
-		events, err := server.jobs.Events(request.PathValue("id"), after)
+		limit := 0
+		if values, present := request.URL.Query()["limit"]; present {
+			if len(values) != 1 {
+				writeError(response, http.StatusBadRequest, "invalid_limit", "limit must be an integer from 1 to 1000")
+				return
+			}
+			limit, err = strconv.Atoi(values[0])
+			if err != nil || limit < 1 || limit > 1000 {
+				writeError(response, http.StatusBadRequest, "invalid_limit", "limit must be an integer from 1 to 1000")
+				return
+			}
+		}
+		events, err := server.jobs.EventsLimit(request.PathValue("id"), after, limit)
 		if err != nil {
 			writeError(response, http.StatusNotFound, "job_not_found", err.Error())
 			return

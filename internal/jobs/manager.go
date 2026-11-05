@@ -12,8 +12,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"sync"
 	"time"
@@ -73,11 +75,14 @@ type Manager struct {
 	queue   chan string
 	wait    sync.WaitGroup
 
-	mutex       sync.RWMutex
-	jobs        map[string]*Job
-	events      map[string][]Event
-	subscribers map[string]map[chan Event]struct{}
-	cancellers  map[string]context.CancelFunc
+	submissionMutex sync.Mutex
+	admissionErr    error
+	submissions     map[string]string
+	mutex           sync.RWMutex
+	jobs            map[string]*Job
+	events          map[string][]Event
+	subscribers     map[string]map[chan Event]struct{}
+	cancellers      map[string]context.CancelFunc
 }
 
 func OpenManager(root string, artifacts *artifact.Store, runner Runner, options ...ManagerOption) (*Manager, error) {
@@ -100,6 +105,7 @@ func OpenManager(root string, artifacts *artifact.Store, runner Runner, options 
 		cancel:      cancel,
 		queue:       make(chan string, 128),
 		jobs:        make(map[string]*Job),
+		submissions: make(map[string]string),
 		events:      make(map[string][]Event),
 		subscribers: make(map[string]map[chan Event]struct{}),
 		cancellers:  make(map[string]context.CancelFunc),
@@ -137,6 +143,66 @@ func (manager *Manager) Create(request Request) (Job, error) {
 }
 
 func (manager *Manager) CreateContext(ctx context.Context, request Request) (Job, error) {
+	job, _, err := manager.CreateSubmissionContext(ctx, request)
+	return job, err
+}
+
+var requestIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+type RequestConflictError struct{ RequestID string }
+
+func (err *RequestConflictError) Error() string {
+	return "requestId already belongs to a different submission"
+}
+
+// CreateSubmissionContext returns replay=true only for a previously accepted request.
+// Validation failures are not recorded. An accepted ID is never enqueued again.
+func (manager *Manager) CreateSubmissionContext(ctx context.Context, request Request) (job Job, replay bool, err error) {
+	request = cloneRequest(request)
+	if request.RequestID != "" && !requestIDPattern.MatchString(request.RequestID) {
+		return Job{}, false, fmt.Errorf("requestId must contain 32 lowercase hexadecimal characters")
+	}
+	manager.submissionMutex.Lock()
+	defer manager.submissionMutex.Unlock()
+	if manager.admissionErr != nil {
+		return Job{}, false, manager.admissionErr
+	}
+	if request.RequestID != "" {
+		manager.mutex.RLock()
+		id, exists := manager.submissions[request.RequestID]
+		if exists {
+			original := cloneJob(manager.jobs[id])
+			manager.mutex.RUnlock()
+			a, _ := json.Marshal(original.Request)
+			b, _ := json.Marshal(request)
+			if !bytes.Equal(a, b) {
+				return Job{}, false, &RequestConflictError{request.RequestID}
+			}
+			return original, true, nil
+		}
+		manager.mutex.RUnlock()
+	}
+	if manager.context.Err() != nil {
+		return Job{}, false, fmt.Errorf("station is shutting down")
+	}
+	job, err = manager.createContext(ctx, request)
+	return job, false, err
+}
+
+func (manager *Manager) Submission(requestID string) (Job, error) {
+	if !requestIDPattern.MatchString(requestID) {
+		return Job{}, fmt.Errorf("invalid requestId")
+	}
+	manager.mutex.RLock()
+	defer manager.mutex.RUnlock()
+	id, ok := manager.submissions[requestID]
+	if !ok {
+		return Job{}, fmt.Errorf("submission was not found")
+	}
+	return cloneJob(manager.jobs[id]), nil
+}
+
+func (manager *Manager) createContext(ctx context.Context, request Request) (Job, error) {
 	request = cloneRequest(request)
 	if err := manager.tasks.Validate(request.DeploymentTasks); err != nil {
 		return Job{}, err
@@ -193,8 +259,12 @@ func (manager *Manager) CreateContext(ctx context.Context, request Request) (Job
 	if err := manager.persistLocked(job); err != nil {
 		delete(manager.jobs, id)
 		delete(manager.events, id)
+		manager.admissionErr = fmt.Errorf("job persistence failed; restart and inspect the station before submitting: %w", err)
 		manager.mutex.Unlock()
 		return Job{}, err
+	}
+	if request.RequestID != "" {
+		manager.submissions[request.RequestID] = id
 	}
 	result := cloneJob(job)
 	manager.mutex.Unlock()
@@ -203,7 +273,7 @@ func (manager *Manager) CreateContext(ctx context.Context, request Request) (Job
 	case manager.queue <- id:
 		return result, nil
 	case <-manager.context.Done():
-		return Job{}, fmt.Errorf("station is shutting down")
+		return result, nil
 	}
 }
 
@@ -251,16 +321,28 @@ func (manager *Manager) Cancel(id string) (Job, error) {
 }
 
 func (manager *Manager) Events(id string, after int) ([]Event, error) {
+	return manager.EventsLimit(id, after, 0)
+}
+
+// EventsLimit returns at most limit events; zero retains the unbounded legacy API.
+func (manager *Manager) EventsLimit(id string, after, limit int) ([]Event, error) {
 	manager.mutex.RLock()
 	defer manager.mutex.RUnlock()
 	if _, ok := manager.jobs[id]; !ok {
 		return nil, fmt.Errorf("job %s was not found", id)
 	}
 	all := manager.events[id]
-	result := make([]Event, 0, len(all))
+	capacity := len(all)
+	if limit > 0 && capacity > limit {
+		capacity = limit
+	}
+	result := make([]Event, 0, capacity)
 	for _, event := range all {
 		if event.Sequence > after {
 			result = append(result, event)
+			if limit > 0 && len(result) == limit {
+				break
+			}
 		}
 	}
 	return result, nil
@@ -505,14 +587,29 @@ func (manager *Manager) load() error {
 		}
 		id := entry.Name()
 		data, err := os.ReadFile(filepath.Join(manager.root, id, "job.json"))
-		if err != nil {
+		if os.IsNotExist(err) {
 			continue
+		} // A directory without a published job was never accepted.
+		if err != nil {
+			return fmt.Errorf("read published job %s: %w", id, err)
 		}
 		var job Job
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&job); err != nil || job.ID != id {
-			continue
+			return fmt.Errorf("invalid published job %s", id)
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return fmt.Errorf("invalid trailing data in published job %s", id)
+		}
+		if job.Request.RequestID != "" {
+			if !requestIDPattern.MatchString(job.Request.RequestID) {
+				return fmt.Errorf("invalid requestId in published job %s", id)
+			}
+			if _, exists := manager.submissions[job.Request.RequestID]; exists {
+				return fmt.Errorf("duplicate requestId in published jobs")
+			}
+			manager.submissions[job.Request.RequestID] = id
 		}
 		manager.jobs[id] = &job
 		manager.events[id] = manager.loadEvents(id)
@@ -540,7 +637,9 @@ func (manager *Manager) load() error {
 				}
 			}
 			manager.emitLocked(&job, "error", job.Error)
-			_ = manager.persistLocked(&job)
+			if err := manager.persistLocked(&job); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -581,14 +680,15 @@ func (manager *Manager) persistLocked(job *Job) error {
 		temporary.Close()
 		return fmt.Errorf("write job metadata: %w", err)
 	}
+	if err := temporary.Sync(); err != nil {
+		temporary.Close()
+		return fmt.Errorf("sync job metadata: %w", err)
+	}
 	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("close job metadata: %w", err)
 	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		_ = os.Remove(path)
-		if retryErr := os.Rename(temporaryPath, path); retryErr != nil {
-			return fmt.Errorf("publish job metadata: %w", retryErr)
-		}
+	if err := publishMetadata(temporaryPath, path); err != nil {
+		return fmt.Errorf("publish job metadata: %w", err)
 	}
 	return nil
 }

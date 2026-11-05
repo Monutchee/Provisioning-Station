@@ -24,6 +24,7 @@ func (state State) Terminal() bool {
 }
 
 type Request struct {
+	RequestID         string                `json:"requestId,omitempty"`
 	DeploymentTasks   *tasks.Plan           `json:"deploymentTasks,omitempty"`
 	ArtifactID        string                `json:"artifactId"`
 	HWServerURL       string                `json:"hwServerUrl"`

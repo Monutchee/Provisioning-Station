@@ -222,6 +222,18 @@ paths:
             schema:
               $ref: "#/components/schemas/JobRequest"
       responses:
+        "200":
+          description: Replayed original job for an identical accepted request ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "409":
+          description: Request ID already accepted with different parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "201":
           description: Queued job
           headers:
@@ -234,6 +246,34 @@ paths:
                 $ref: "#/components/schemas/Job"
         "400":
           $ref: "#/components/responses/BadRequest"
+  /submissions/{requestId}:
+    parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+    get:
+      summary: Reconcile an accepted job submission without resubmitting
+      description: A missing record does not prove another in-flight submission has finished. Retry only with the same request ID and payload.
+      responses:
+        "200":
+          description: Original accepted job, including its current state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requestId, jobId, job]
+                properties:
+                  requestId:
+                    type: string
+                  jobId:
+                    type: string
+                  job:
+                    $ref: "#/components/schemas/Job"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /jobs/{jobId}:
     parameters:
       - $ref: "#/components/parameters/JobId"
@@ -265,6 +305,13 @@ paths:
   /jobs/{jobId}/events:
     parameters:
       - $ref: "#/components/parameters/JobId"
+      - name: limit
+        in: query
+        description: Maximum events in a JSON page; omitted preserves legacy unlimited history. Does not apply to SSE. Continue with the final returned sequence as after.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
       - name: after
         in: query
         schema:
@@ -716,6 +763,10 @@ components:
       additionalProperties: false
       required: [artifactId, hwServerUrl, tftpServerIp]
       properties:
+        requestId:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+          description: Optional accepted-job idempotency key. Reuse only with the same payload; accepted IDs never execute again, including after restart. Validation failures are not recorded.
         deploymentTasks:
           $ref: "#/components/schemas/DeploymentTasks"
         artifactId:
