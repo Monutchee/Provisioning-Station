@@ -19,7 +19,11 @@ import (
 // Button is local because Bubbles has no button component.
 type Viewer struct{ viewport.Model }
 
-func NewViewer() Viewer { return Viewer{viewport.New(viewport.WithWidth(80), viewport.WithHeight(15))} }
+func NewViewer() Viewer {
+	v := viewport.New(viewport.WithWidth(80), viewport.WithHeight(15))
+	v.SoftWrap = true
+	return Viewer{v}
+}
 
 type TreeViewer struct{ tree.Model }
 

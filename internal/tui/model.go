@@ -14,7 +14,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/Monutchee/Provisioning-Station/internal/artifact"
 	"github.com/Monutchee/Provisioning-Station/internal/jobs"
 	"github.com/Monutchee/Provisioning-Station/internal/stationclient"
@@ -43,6 +42,8 @@ type Model struct {
 	fields                               []TextField
 	importPath                           TextField
 	importing, treeFocused               bool
+	rawArtifact                          bool
+	detailOffset                         int
 	focus                                int
 	status                               string
 	busy                                 bool
@@ -93,7 +94,9 @@ type canceledMsg struct {
 type tickMsg struct{}
 
 func New(ctx context.Context, client *stationclient.Client) Model {
-	return Model{ctx: ctx, client: client, width: 100, height: 30, artifactViewer: NewViewer(), logViewer: NewViewer(), tree: NewTreeViewer(), importPath: NewTextField("Artifact archive path", ""), status: "Loading station…", fields: []TextField{NewTextField("Hardware server", "tcp:127.0.0.1:3121"), NewTextField("TFTP server IPv4", ""), NewTextField("Board IPv4 (optional)", ""), NewTextField("Serial port ID (optional)", ""), NewTextField("Deployment tasks JSON (optional)", ""), NewTextField("Reset confirmation", "")}}
+	m := Model{ctx: ctx, client: client, width: 100, height: 30, artifactViewer: NewViewer(), logViewer: NewViewer(), tree: NewTreeViewer(), importPath: NewTextField("Artifact archive path", ""), status: "Loading station…", fields: []TextField{NewTextField("Hardware server", "tcp:127.0.0.1:3121"), NewTextField("TFTP server IPv4", ""), NewTextField("Board IPv4 (optional)", ""), NewTextField("Serial port ID (optional)", ""), NewTextField("Deployment tasks JSON (optional)", ""), NewTextField("Reset confirmation", "")}}
+	m.resize()
+	return m
 }
 func Run(ctx context.Context, client *stationclient.Client) error {
 	_, err := tea.NewProgram(New(ctx, client), tea.WithContext(ctx)).Run()
@@ -128,17 +131,17 @@ func (m *Model) setError(err error) bool {
 	return false
 }
 func (m *Model) resize() {
-	w := max(20, m.width-4)
-	h := max(3, m.height-15)
+	l := m.layout()
+	w, h := max(1, l.detail.w), max(1, l.detail.h)
 	m.artifactViewer.SetWidth(w)
 	m.artifactViewer.SetHeight(h)
 	m.logViewer.SetWidth(w)
-	m.logViewer.SetHeight(h)
+	m.logViewer.SetHeight(max(1, m.logArea().h))
 	m.tree.SetSize(w, h)
 	for i := range m.fields {
-		m.fields[i].Input.SetWidth(max(10, w-32))
+		m.fields[i].Input.SetWidth(max(10, m.width-38))
 	}
-	m.importPath.Input.SetWidth(max(10, w-25))
+	m.importPath.Input.SetWidth(max(10, l.detail.w-24))
 }
 func (m *Model) focusField() tea.Cmd {
 	for i := range m.fields {
@@ -155,13 +158,22 @@ func (m *Model) updateArtifact() {
 		a := m.artifacts[m.artifactIndex]
 		m.tree.SetArtifact(a)
 		data, _ := json.MarshalIndent(a, "", "  ")
+		m.artifactViewer.GotoTop()
 		if m.tab == artifactsTab {
-			m.artifactViewer.SetContent(string(data))
+			if m.rawArtifact {
+				m.artifactViewer.SetContent(string(data))
+			} else {
+				m.artifactViewer.SetContent(artifactSummary(a))
+			}
 		}
 	}
 }
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		return m.mouseClick(msg)
+	case tea.MouseWheelMsg:
+		return m.mouseWheel(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -188,6 +200,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.setError(msg.err) {
 			m.jobs = msg.items
 			m.jobIndex = min(m.jobIndex, max(0, len(m.jobs)-1))
+			m.resize()
 		}
 		return m, nil
 	case capsMsg:
@@ -215,7 +228,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedJob = msg.job.ID
 			m.after = 0
 			m.logText = ""
-			m.tab = jobsTab
+			m.selectTab(jobsTab)
 			m.status = "Accepted job " + msg.job.ID
 			return m, tea.Batch(m.loadJobs(), m.loadLogs())
 		}
@@ -230,7 +243,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedJob = msg.submission.JobID
 			m.after = 0
 			m.logText = ""
-			m.tab = jobsTab
+			m.selectTab(jobsTab)
 			m.status = "Recovered accepted job " + msg.submission.JobID
 			return m, tea.Batch(m.loadJobs(), m.loadLogs())
 		}
@@ -246,6 +259,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if !m.setError(msg.err) {
+			m.resize()
+			followBottom := m.logViewer.AtBottom()
 			for _, event := range msg.events {
 				if event.Sequence <= m.after {
 					continue
@@ -258,7 +273,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.tab == jobsTab {
 				m.logViewer.SetContent(m.logText)
-				m.logViewer.GotoBottom()
+				if followBottom {
+					m.logViewer.GotoBottom()
+				}
 			}
 		}
 		return m, nil
@@ -323,7 +340,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.focusField()
 				return m, cmd
 			}
-			m.tab = (m.tab + 1) % 4
+			m.selectTab((m.tab + 1) % 4)
 			if m.tab == provisionTab {
 				cmd := m.focusField()
 				return m, cmd
@@ -336,18 +353,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ctrl+1..4 always select screens even while editing a field.
 		switch key {
 		case "ctrl+a":
-			m.tab = artifactsTab
+			m.selectTab(artifactsTab)
 			m.updateArtifact()
 			return m, nil
 		case "ctrl+t":
-			m.tab = targetsTab
+			m.selectTab(targetsTab)
 			return m, m.loadTargets()
 		case "ctrl+p":
-			m.tab = provisionTab
+			m.selectTab(provisionTab)
 			cmd := m.focusField()
 			return m, cmd
 		case "ctrl+j":
-			m.tab = jobsTab
+			m.selectTab(jobsTab)
 			m.logViewer.SetContent(m.logText)
 			return m, nil
 		}
@@ -379,11 +396,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateArtifact()
 					return m, nil
 				}
+			case "v":
+				m.rawArtifact = !m.rawArtifact
+				m.treeFocused = false
+				m.updateArtifact()
+				return m, nil
 			case "t":
 				m.treeFocused = !m.treeFocused
 				return m, nil
 			case "p":
-				m.tab = provisionTab
+				m.selectTab(provisionTab)
 				m.focus = 1
 				cmd := m.focusField()
 				return m, cmd
@@ -405,7 +427,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "down", "j":
 				m.targetIndex = min(max(0, len(m.targets)-1), m.targetIndex+1)
 			case "enter", "p":
-				m.tab = provisionTab
+				m.selectTab(provisionTab)
 				m.focus = 2
 				m.focusField()
 			}
@@ -423,6 +445,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				if len(m.jobs) > 0 {
 					m.selectedJob = m.jobs[m.jobIndex].ID
+					m.resize()
 					m.after = 0
 					m.logText = ""
 					return m, m.loadLogs()
@@ -557,158 +580,6 @@ func (m Model) prepareRequest() (jobs.Request, error) {
 	request.RequestID, err = stationclient.NewRequestID()
 	return request, err
 }
-func (m Model) View() tea.View {
-	if m.width < 70 || m.height < 24 {
-		v := tea.NewView("MPS needs a terminal at least 70 columns × 24 rows. Resize to continue. Ctrl+C quits; jobs keep running.")
-		v.AltScreen = true
-		return v
-	}
-	tabs := []string{"Artifacts", "Targets", "Provision", "Jobs"}
-	for i := range tabs {
-		if i == m.tab {
-			tabs[i] = lipgloss.NewStyle().Bold(true).Reverse(true).Render(" " + tabs[i] + " ")
-		}
-	}
-	body := ""
-	switch m.tab {
-	case artifactsTab:
-		body = "i import · ↑/↓ select artifact · t payload tree focus · p provision · r refresh\n"
-		if m.importing {
-			body += m.importPath.View() + "\nEnter imports; Esc closes\n"
-		} else {
-			body += m.artifactList() + "\n"
-			if m.treeFocused {
-				body += m.tree.View()
-			} else {
-				body += m.artifactViewer.View()
-			}
-		}
-	case targetsTab:
-		body = "↑/↓ select target · Enter provision · r discover again\nHardware server: " + m.fields[0].Input.Value() + " (edit on Provision screen)\n"
-		start := max(0, m.targetIndex-4)
-		end := min(len(m.targets), start+max(1, m.height-12))
-		for i := start; i < end; i++ {
-			t := m.targets[i]
-			marker := "  "
-			if i == m.targetIndex {
-				marker = "> "
-			}
-			body += fmt.Sprintf("%s%s  %s  cable=%s device=%s UART=%s\n", marker, cleanLine(t.ID), cleanLine(t.Name), cleanLine(t.CableSerial), cleanLine(t.DeviceIndex), cleanLine(t.SerialAssociation))
-			if i == m.targetIndex && t.SerialPort != nil {
-				body += "  Matched serial port ID: " + cleanLine(t.SerialPort.ID) + "\n"
-			}
-		}
-		if len(m.targets) == 0 {
-			body += "No targets discovered.\n"
-		}
-	case provisionTab:
-		a, t := "No artifact", "No target"
-		if len(m.artifacts) > 0 {
-			a = cleanLine(m.artifacts[m.artifactIndex].Manifest.Artifact.Name + " " + m.artifacts[m.artifactIndex].ID)
-		}
-		if len(m.targets) > 0 {
-			target := m.targets[m.targetIndex]
-			t = cleanLine("cable=" + target.CableSerial + " device=" + target.DeviceIndex + " id=" + target.ID + " " + target.Name)
-		}
-		if m.pending != nil {
-			a = m.pending.ArtifactID
-			t = cleanLine("cable=" + m.pending.TargetCableSerial + " device=" + m.pending.TargetDeviceIndex + " id=" + m.pending.TargetID)
-		}
-		body = "Tab/Shift+Tab focus · ←/→ choose artifact/target · Ctrl+T discover · Esc leave field\n"
-		for i, line := range []string{"Artifact: " + a, "Target: " + t} {
-			if m.focus == i {
-				line = lipgloss.NewStyle().Reverse(true).Render(line)
-			}
-			body += line + "\n"
-		}
-		if m.pending == nil {
-			for _, field := range m.fields {
-				body += field.View() + "\n"
-			}
-		} else {
-			body += "Hardware server: " + cleanLine(m.pending.HWServerURL) + "\nTFTP server IPv4: " + cleanLine(m.pending.TFTPServerIP) + "\nBoard IPv4: " + cleanLine(m.pending.BoardIP) + "\n"
-			serial := "none"
-			if m.pending.SerialConsole != nil {
-				data, _ := json.Marshal(m.pending.SerialConsole)
-				serial = string(data)
-			}
-			body += "Serial capture: " + serial + "\n"
-			taskJSON := "none"
-			if m.pending.DeploymentTasks != nil {
-				data, _ := json.Marshal(m.pending.DeploymentTasks)
-				taskJSON = string(data)
-			}
-			body += "Deployment tasks: " + taskJSON + "\nReset authorization retained for selected target\n"
-		}
-		if m.pending == nil {
-			body += "Type this exact reset confirmation:\n" + cleanLine(m.resetPhrase()) + "\n"
-		}
-		body += (Button{Label: "Prepare / Submit", Enabled: !m.busy, Focused: m.focus == 8}).View() + "\n"
-		if m.pending != nil {
-			body += "Retained requestId: " + m.pending.RequestID + "\nEnter submits/retries exact request; r reconciles. Target: " + cleanLine(m.pending.TargetCableSerial+"/"+m.pending.TargetDeviceIndex) + "\n"
-		}
-	case jobsTab:
-		body = "↑/↓ select · Enter inspect/follow logs · c cancel opened job · r refresh\n"
-		start := max(0, m.jobIndex-3)
-		end := min(len(m.jobs), start+7)
-		for i := start; i < end; i++ {
-			job := m.jobs[i]
-			marker := "  "
-			if i == m.jobIndex {
-				marker = "> "
-			}
-			body += fmt.Sprintf("%s%s  %-10s %s\n", marker, cleanLine(job.ID), cleanLine(string(job.State)), cleanLine(job.Request.TargetCableSerial))
-		}
-		if len(m.jobs) == 0 {
-			body += "No jobs.\n"
-		}
-		if m.selectedJob != "" {
-			body += "Opened job: " + cleanLine(m.selectedJob) + "\n"
-			for _, job := range m.jobs {
-				if job.ID != m.selectedJob {
-					continue
-				}
-				if !job.ArtifactAvailable {
-					body += "Artifact unavailable. Reimport the original archive before provisioning again.\n"
-				}
-				if job.EventsTruncated {
-					body += "Event history truncated; only retained events are shown.\n"
-				}
-			}
-			body += m.logViewer.View()
-		}
-	}
-	footer := "\n" + cleanLine(m.status) + "\nCtrl+A artifacts · Ctrl+T targets · Ctrl+P provision · Ctrl+J jobs · Ctrl+C quit"
-	if m.busy {
-		footer = "\nWorking… " + cleanLine(m.status) + "\nCtrl+C leaves durable jobs running"
-	}
-	content := strings.Join(tabs, "  ") + "\n\n" + body + footer
-	lines := strings.Split(content, "\n")
-	for i := range lines {
-		lines[i] = ansi.Truncate(lines[i], m.width, "")
-	}
-	content = strings.Join(lines, "\n")
-	view := tea.NewView(lipgloss.NewStyle().Width(max(20, m.width)).MaxHeight(max(5, m.height)).Render(content))
-	view.AltScreen = true
-	return view
-}
-func (m Model) artifactList() string {
-	if len(m.artifacts) == 0 {
-		return "No imported artifacts."
-	}
-	lines := []string{}
-	start := max(0, m.artifactIndex-2)
-	for i := start; i < min(len(m.artifacts), start+5); i++ {
-		a := m.artifacts[i]
-		prefix := "  "
-		if i == m.artifactIndex {
-			prefix = "> "
-		}
-		lines = append(lines, prefix+cleanLine(a.Manifest.Artifact.Name+" "+a.ID))
-	}
-	return strings.Join(lines, "\n")
-}
-
 func cleanText(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\t' || r >= 32 && (r < 127 || r > 159) {
