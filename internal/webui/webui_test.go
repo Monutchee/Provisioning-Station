@@ -17,9 +17,11 @@ func TestHandlerEmbedsTerminalAssets(t *testing.T) {
 		content string
 	}{
 		{path: "/", content: "Serial console"},
-		{path: "/vendor/xterm/xterm.js", content: "Terminal"},
-		{path: "/vendor/xterm/addon-fit.js", content: "FitAddon"},
-		{path: "/vendor/xterm/xterm.css", content: ".xterm"},
+		{path: "/vendor/hterm/hterm.js", content: "hterm"},
+		{path: "/vendor/hterm/messages.en.json", content: "HTERM_"},
+		{path: "/vendor/hterm/LICENSE.hterm", content: "Redistribution"},
+		{path: "/terminal.js", content: "createTerminal"},
+		{path: "/terminal-output.js", content: "TerminalOutput"},
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)
 		response := httptest.NewRecorder()
@@ -93,7 +95,7 @@ func TestHandlerEmbedsArtifactUploadFeedbackInDropZone(t *testing.T) {
 	}
 }
 
-func TestHandlerCSPAllowsXtermDynamicStylesButNotInlineScripts(t *testing.T) {
+func TestHandlerCSPAllowsTerminalDynamicStylesButNotInlineScripts(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	response := httptest.NewRecorder()
 	Handler().ServeHTTP(response, request)

@@ -123,3 +123,30 @@ jobs:
             build/development-ci/mnc-station_*_amd64.deb
             build/development-ci/mnc-station_*_arm64.deb
             build/development-ci/mnc-station_*_windows_amd64.zip
+
+  terminal:
+    name: Verify embedded terminal assets and browser behavior
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tools/hterm/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: tools/hterm
+      - run: npm run check
+        working-directory: tools/hterm
+      - run: npx playwright install --with-deps chromium
+        working-directory: tools/hterm
+      - run: go build -o /tmp/mnc-station-browser ./cmd/mnc-station
+      - run: npm test
+        working-directory: tools/hterm
+        env:
+          STATION_BINARY: /tmp/mnc-station-browser

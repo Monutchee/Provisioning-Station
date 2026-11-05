@@ -7,11 +7,14 @@ packages for Linux and Windows. For operating instructions, see
 ## Build design
 
 Provisioning Station is a Go application with an embedded HTML/CSS/JavaScript
-dashboard. It has no third-party Go modules and does not require Node.js. The
+dashboard. Ordinary builds use checked-in browser assets and do not require Node.js. The
 same source builds one self-contained executable for Linux or Windows.
 
 Vivado, Vitis, XSDB, and `hw_server` are runtime dependencies for Xilinx JTAG
 jobs; they are not needed to compile or unit-test the program.
+
+For the optional pinned hterm source checkout, asset regeneration and browser
+regression tests, see [terminal asset maintenance](../tools/hterm/README.md).
 
 ## Source and tool requirements
 

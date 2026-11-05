@@ -1,6 +1,8 @@
 // Copyright 2026 Monutchee
 // SPDX-License-Identifier: Apache-2.0
 
+import { createTerminal } from "./terminal.js";
+
 "use strict";
 
 const state = {
@@ -19,8 +21,7 @@ const state = {
   jobTimer: null,
   toastTimer: null,
   terminal: null,
-  fitAddon: null,
-  terminalInput: null,
+  terminalPending: null,
   consoleSocket: null,
   consoleSessionId: "",
   consoleAccess: "",
@@ -579,49 +580,24 @@ function renderConsolePortDetail() {
   elements["console-port-detail"].textContent = `${pairing}${description}${active}${lease}`;
 }
 
-function ensureTerminal() {
-  if (state.terminal) return;
-  if (!globalThis.Terminal || !globalThis.FitAddon?.FitAddon) {
-    throw new Error("The embedded terminal assets could not be loaded.");
+async function ensureTerminal() {
+  if (state.terminal) return state.terminal;
+  if (!state.terminalPending) {
+    state.terminalPending = createTerminal(elements["serial-terminal"], (data) => {
+      if (!state.consoleReady || state.consoleAccess !== "controller" || state.consoleSocket?.readyState !== WebSocket.OPEN) return;
+      if (state.consoleSocket.bufferedAmount > (1 << 20)) {
+        showToast("Serial input paused while the browser catches up");
+        return;
+      }
+      state.consoleSocket.send(new TextEncoder().encode(data));
+    }).then((terminal) => {
+      state.terminal = terminal;
+      terminal.writeln("\x1b[1;32mMonutchee serial console\x1b[0m");
+      terminal.writeln("Select a serial port and connect.\r\n");
+      return terminal;
+    }).finally(() => { state.terminalPending = null; });
   }
-  state.terminal = new globalThis.Terminal({
-    allowProposedApi: false,
-    convertEol: false,
-    cursorBlink: true,
-    cursorStyle: "block",
-    fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace",
-    fontSize: 13,
-    linkHandler: {
-      activate: () => showToast("Links emitted by the target are disabled"),
-      allowNonHttpProtocols: false,
-    },
-    scrollback: 10000,
-    theme: {
-      background: "#0c1210", foreground: "#dce9e1", cursor: "#56c79d", selectionBackground: "#315345",
-    },
-  });
-  state.fitAddon = new globalThis.FitAddon.FitAddon();
-  state.terminal.loadAddon(state.fitAddon);
-  state.terminal.open(elements["serial-terminal"]);
-  state.fitAddon.fit();
-  state.terminal.writeln("\x1b[1;32mMonutchee serial console\x1b[0m");
-  state.terminal.writeln("Select a serial port and connect.\r\n");
-  state.terminalInput = state.terminal.onData((data) => {
-    if (!state.consoleReady || state.consoleAccess !== "controller" || state.consoleSocket?.readyState !== WebSocket.OPEN) return;
-    if (state.consoleSocket.bufferedAmount > (1 << 20)) {
-      showToast("Serial input paused while the browser catches up");
-      return;
-    }
-    state.consoleSocket.send(new TextEncoder().encode(data));
-  });
-  const resize = () => {
-    try { state.fitAddon.fit(); } catch (_) { /* terminal may be between layouts */ }
-  };
-  if (globalThis.ResizeObserver) {
-    new ResizeObserver(resize).observe(elements["serial-terminal"]);
-  } else {
-    window.addEventListener("resize", resize);
-  }
+  return state.terminalPending;
 }
 
 function setConsoleStatus(label, mode = "") {
@@ -644,13 +620,18 @@ async function connectConsole() {
     showToast("Serial baud must be an integer between 300 and 4000000");
     return;
   }
+  const generation = ++state.consoleGeneration;
+  elements["console-connect"].disabled = true;
   try {
-    ensureTerminal();
+    await ensureTerminal();
+    if (generation !== state.consoleGeneration) return;
   } catch (error) {
-    showToast(error.message);
+    if (generation === state.consoleGeneration) {
+      renderConsolePorts();
+      showToast(error.message);
+    }
     return;
   }
-  elements["console-connect"].disabled = true;
   setConsoleStatus("Connecting");
   let access = "controller";
   let session;
@@ -666,11 +647,14 @@ async function connectConsole() {
       elements["serial-baud"].value = observerBaud;
       session = await requestSerialSession(portId, observerBaud, access);
     }
+    if (generation !== state.consoleGeneration) {
+      api(`/api/v1/serial/sessions/${session.id}`, { method: "DELETE" }).catch(() => {});
+      return;
+    }
     const websocketURL = new URL(session.websocketPath, window.location.href);
     websocketURL.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(websocketURL);
     socket.binaryType = "arraybuffer";
-    const generation = ++state.consoleGeneration;
     state.consoleSocket = socket;
     state.consoleSessionId = session.id;
     state.consoleAccess = access;
@@ -714,6 +698,7 @@ async function connectConsole() {
     if (session?.id) {
       api(`/api/v1/serial/sessions/${session.id}`, { method: "DELETE" }).catch(() => {});
     }
+    if (generation !== state.consoleGeneration) return;
     state.consoleSocket = null;
     state.consoleSessionId = "";
     state.consoleReady = false;
@@ -750,16 +735,20 @@ function selectConsoleForJob() {
 async function loadJobTranscript() {
   const job = selectedJob();
   if (!job?.serialCapture) return;
+  disconnectConsole();
+  const generation = state.consoleGeneration;
   try {
-    ensureTerminal();
-    disconnectConsole();
+    await ensureTerminal();
+    if (generation !== state.consoleGeneration) return;
     setConsoleStatus("Loading transcript");
     const data = await apiBytes(`/api/v1/jobs/${job.id}/serial-transcript`);
+    if (generation !== state.consoleGeneration) return;
     state.terminal.reset();
     state.terminal.write(data);
     const suffix = job.serialCapture.truncated ? " · truncated" : "";
     setConsoleStatus(`Transcript · ${formatBytes(data.length)}${suffix}`, job.serialCapture.truncated ? "observer" : "connected");
   } catch (error) {
+    if (generation !== state.consoleGeneration) return;
     setConsoleStatus("Disconnected");
     showToast(error.message);
   }
@@ -831,7 +820,10 @@ elements["console-port"].addEventListener("change", renderConsolePortDetail);
 elements["console-connect"].addEventListener("click", connectConsole);
 elements["console-disconnect"].addEventListener("click", disconnectConsole);
 elements["console-transcript"].addEventListener("click", loadJobTranscript);
-window.addEventListener("beforeunload", () => state.consoleSocket?.close(1000, "page closed"));
+window.addEventListener("beforeunload", () => {
+  state.consoleSocket?.close(1000, "page closed");
+  state.terminal?.dispose();
+});
 
-try { ensureTerminal(); } catch (error) { showToast(error.message); }
+ensureTerminal().catch((error) => showToast(error.message));
 loadCapabilities();
