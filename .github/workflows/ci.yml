@@ -70,7 +70,7 @@ jobs:
         run: |
           bash -n packaging/bash-completion/mps packaging/bash-completion/mpsd
           bash packaging/test-git-version.sh
-          python3 -B packaging/migration/test_migrate.py
+          python3 -B -m unittest discover -s packaging/migration -p 'test_*.py'
           mkdir -p build/release-ci
           touch build/release-ci/stale-output
           ./packaging/build-release.sh 0.0.0 build/release-ci

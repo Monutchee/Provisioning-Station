@@ -34,8 +34,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if os.Args[1] == "seed" {
+	if os.Args[1] == "seed" || os.Args[1] == "seed-old" {
 		payload := map[string][]byte{"jtag/load.tcl": []byte("puts fixture\n"), "tftp/Image": []byte("retained kernel\n")}
+		if os.Args[1] == "seed-old" {
+			payload["tftp/Image"] = []byte("obsolete kernel\n")
+		}
 		manifest := artifact.Manifest{Schema: artifact.SchemaName, FormatVersion: 2,
 			Artifact: artifact.ArtifactMetadata{Name: "fixture", Vendor: "xilinx", Operation: "jtag-boot", Product: "fixture", Machine: "fixture", Version: "1.0.0", BuildID: "fixture", CreatedUTC: "2026-11-05T00:00:00Z"},
 			Executor: artifact.ExecutorMetadata{Type: "xilinx-xsdb", Entrypoint: "jtag/load.tcl", TFTPRoot: "tftp"}, Files: map[string]artifact.FileDescriptor{}}

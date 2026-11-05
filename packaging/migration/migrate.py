@@ -219,6 +219,16 @@ def job_records():
     return {path.parent.name: json.loads(path.read_text()) for path in (OLD_STATE / "jobs").glob("*/job.json")}
 
 
+def check_retention_ready():
+    # The new daemon enforces retention during startup. Refuse before mutation
+    # rather than treating its intentional cleanup as a failed preservation.
+    jobs = job_records()
+    completed = sum(job.get('state') in ('succeeded', 'failed', 'canceled') for job in jobs.values())
+    total = sum(path.stat().st_size for path in OLD_STATE.rglob('*') if path.is_file())
+    if completed > 30 or total > 10 * 1024**3 - 4 * 1024**2:
+        raise RuntimeError('legacy state exceeds retention startup limits (30 completed histories, 10 GiB minus 4 MiB maintenance reserve); run cleanup.py preview/apply first')
+
+
 def check_space(old_deb, new_deb):
     total = sum(path.stat().st_size for path in OLD_STATE.rglob("*") if path.is_file()) if OLD_STATE.exists() else 0
     # Backup plus migrated copy, exact package media, and working headroom.
@@ -316,6 +326,9 @@ def migrate():
     for checkpoint in BACKUP_ROOT.glob("mps-migration-*/checkpoint.json"):
         if json.loads(checkpoint.read_text()).get("phase") not in ("complete", "rolled-back", "preflight"):
             raise RuntimeError(f"unfinished migration checkpoint requires manual recovery: {checkpoint}")
+    for checkpoint in BACKUP_ROOT.glob("mps-cleanup-*/checkpoint.json"):
+        if json.loads(checkpoint.read_text()).get("phase") not in ("complete", "preview"):
+            raise RuntimeError(f"unfinished cleanup requires cleanup.py resume: {checkpoint}")
     installed = run("dpkg-query", "-W", "-f=${Status}\n${Version}\n${Architecture}", OLD).stdout.splitlines()
     if len(installed) != 3 or installed[0] != "install ok installed":
         raise RuntimeError("legacy mnc-station package must be fully installed")
@@ -334,6 +347,7 @@ def migrate():
         raise RuntimeError("new config already exists; preserve and resolve it manually before migration")
     snapshot(OLD_STATE)
     check_jobs()
+    check_retention_ready()
     config, token_source, settings = translated_config()
     preflight_services(old_deb)
     before_jobs = job_records()

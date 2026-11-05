@@ -130,7 +130,7 @@ for arch in amd64 arm64; do
         "${root}/completion/mps.bash"
     install -m 0644 "${PROJECT_ROOT}/packaging/bash-completion/mpsd" "${root}/completion/mpsd.bash"
     install -d -m 0755 "${root}/migration/legacy-units"
-    install -m 0755 "${PROJECT_ROOT}/packaging/migration/migrate.py" "${root}/migration/"
+    install -m 0755 "${PROJECT_ROOT}/packaging/migration/migrate.py" "${PROJECT_ROOT}/packaging/migration/cleanup.py" "${root}/migration/"
     install -m 0644 "${PROJECT_ROOT}/packaging/migration/legacy-units/"*.service "${root}/migration/legacy-units/"
     tar -C "${STAGING}" -czf "${OUTPUT_DIR}/${package}.tar.gz" "${package}"
     if command -v dpkg-deb >/dev/null 2>&1; then
