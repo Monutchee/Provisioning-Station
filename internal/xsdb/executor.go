@@ -42,17 +42,17 @@ func (executor Executor) Resolve() (string, error) {
 }
 
 func (executor Executor) resolve(installRoots []string) (string, error) {
-	return resolveXilinxTool(executor.Path, "MNC_XSDB", "xsdb-path", "xsdb", installRoots)
+	return resolveXilinxTool(executor.Path, "MPS_XSDB", "xsdb-path", "xsdb", installRoots)
 }
 
 // ResolveHWServer locates the Xilinx hardware server executable. An explicit
-// path takes precedence over MNC_HW_SERVER and automatic discovery.
+// path takes precedence over MPS_HW_SERVER and automatic discovery.
 func ResolveHWServer(path string) (string, error) {
 	return resolveHWServer(path, defaultInstallRoots())
 }
 
 func resolveHWServer(path string, installRoots []string) (string, error) {
-	return resolveXilinxTool(path, "MNC_HW_SERVER", "hw-server-path", "hw_server", installRoots)
+	return resolveXilinxTool(path, "MPS_HW_SERVER", "hw-server-path", "hw_server", installRoots)
 }
 
 func resolveXilinxTool(path, overrideEnvironment, option, name string, installRoots []string) (string, error) {

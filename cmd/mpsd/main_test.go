@@ -4,12 +4,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/Monutchee/Provisioning-Station/internal/statelock"
 )
 
 func TestRunXilinxHWServerCheck(t *testing.T) {
@@ -17,8 +20,8 @@ func TestRunXilinxHWServerCheck(t *testing.T) {
 	if err := os.WriteFile(executable, []byte("test executable"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("MNC_HW_SERVER", executable)
-	t.Setenv("MNC_HW_SERVER_LISTEN", "tcp:127.0.0.1:3121")
+	t.Setenv("MPS_HW_SERVER", executable)
+	t.Setenv("MPS_HW_SERVER_LISTEN", "tcp:127.0.0.1:3121")
 	if err := runXilinxHWServer([]string{"--check"}); err != nil {
 		t.Fatal(err)
 	}
@@ -29,8 +32,8 @@ func TestRunXilinxHWServerUsesLoopbackAndPassesArguments(t *testing.T) {
 	if err := os.WriteFile(executable, []byte("test executable"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("MNC_HW_SERVER", executable)
-	t.Setenv("MNC_HW_SERVER_LISTEN", "")
+	t.Setenv("MPS_HW_SERVER", executable)
+	t.Setenv("MPS_HW_SERVER_LISTEN", "")
 	var resolved string
 	var arguments []string
 	err := runXilinxHWServerWithExecutor([]string{"--", "-q"}, func(path string, values []string) error {
@@ -58,7 +61,7 @@ func TestRunXilinxHWServerRejectsInvalidListenURL(t *testing.T) {
 }
 
 func TestDefaultServeConfigListensOnAllIPv4Interfaces(t *testing.T) {
-	t.Setenv("MNC_STATION_HTTP_LISTEN", "")
+	t.Setenv("MPS_HTTP_LISTEN", "")
 	config, err := defaultServeConfig()
 	if err != nil {
 		t.Fatal(err)
@@ -69,8 +72,8 @@ func TestDefaultServeConfigListensOnAllIPv4Interfaces(t *testing.T) {
 }
 
 func TestDefaultServeConfigReadsSerialLimits(t *testing.T) {
-	t.Setenv("MNC_STATION_SERIAL_BAUD", "921600")
-	t.Setenv("MNC_STATION_MAX_CONSOLE_LOG_BYTES", "1048576")
+	t.Setenv("MPS_SERIAL_BAUD", "921600")
+	t.Setenv("MPS_MAX_CONSOLE_LOG_BYTES", "1048576")
 	config, err := defaultServeConfig()
 	if err != nil {
 		t.Fatal(err)
@@ -81,8 +84,8 @@ func TestDefaultServeConfigReadsSerialLimits(t *testing.T) {
 }
 
 func TestDefaultServeConfigRejectsInvalidSerialEnvironment(t *testing.T) {
-	t.Setenv("MNC_STATION_SERIAL_BAUD", "fast")
-	if _, err := defaultServeConfig(); err == nil || !strings.Contains(err.Error(), "MNC_STATION_SERIAL_BAUD") {
+	t.Setenv("MPS_SERIAL_BAUD", "fast")
+	if _, err := defaultServeConfig(); err == nil || !strings.Contains(err.Error(), "MPS_SERIAL_BAUD") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -223,5 +226,41 @@ func TestAPITokenFileRejectsEnvironmentTokenRotation(t *testing.T) {
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "cannot rotate") {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestServeRejectsCompetingStateBeforeRecovery(t *testing.T) {
+	dir := t.TempDir()
+	jobDir := filepath.Join(dir, "jobs", "existing")
+	if err := os.MkdirAll(jobDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(jobDir, "job.json")
+	data := []byte(`{"id":"existing","state":"running"}`)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := statelock.Acquire(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	config, err := defaultServeConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.DataDir = dir
+	if err := serveContext(context.Background(), config, nil); err == nil {
+		t.Fatal("competing daemon accepted")
+	}
+	actual, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(actual) != string(data) {
+		t.Fatal("competing daemon modified active job")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "api-token")); !os.IsNotExist(err) {
+		t.Fatal("competing daemon created token")
 	}
 }

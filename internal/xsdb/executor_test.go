@@ -271,7 +271,7 @@ func TestDefaultInstallRootMatchesPlatform(t *testing.T) {
 
 func clearXSDBEnvironment(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{"MNC_XSDB", "MNC_HW_SERVER", "XILINX_VITIS", "XILINX_VIVADO"} {
+	for _, name := range []string{"MPS_XSDB", "MPS_HW_SERVER", "XILINX_VITIS", "XILINX_VIVADO"} {
 		t.Setenv(name, "")
 	}
 }
